@@ -107,6 +107,11 @@ def pessoas():
     return render_template("pessoas.html")
 
 
+@app.get("/pessoas/lista")
+def pessoas_lista():
+    return render_template("pessoas_lista.html")
+
+
 @app.get("/itens")
 def itens():
     proximo = get_db().execute("SELECT COALESCE(MAX(id), 0) + 1 AS p FROM itens").fetchone()["p"]
@@ -162,13 +167,41 @@ def api_pessoa(pid):
     return jsonify(dict(row))
 
 
+@app.get("/api/pessoas")
+def api_listar_pessoas():
+    """Lista paginada por limite, com filtro por nome (sem acento) ou número de cadastro."""
+    q = request.args.get("q", "").strip()
+    where, params = "", []
+    if q:
+        nq = normalizar(q).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        where = "WHERE norm(p.nome) LIKE ? ESCAPE '\\'"
+        params.append(f"%{nq}%")
+        if q.isascii() and q.isdigit():
+            where = "WHERE (norm(p.nome) LIKE ? ESCAPE '\\' OR p.id = ?)"
+            params.append(int(q))
+    db = get_db()
+    total = db.execute(f"SELECT COUNT(*) AS n FROM pessoas p {where}", params).fetchone()["n"]
+    rows = db.execute(
+        f"""SELECT p.id, p.nome, p.cpf, p.telefone, p.funcao,
+                   COUNT(v.id) AS qtd_itens, COALESCE(SUM(v.valor_arremate), 0) AS total
+              FROM pessoas p
+              LEFT JOIN arremates_vencedores v ON v.arrematante_id = p.id
+              {where}
+             GROUP BY p.id
+             ORDER BY p.nome COLLATE NOCASE, p.id
+             LIMIT 300""",
+        params,
+    ).fetchall()
+    return jsonify({"total": total, "pessoas": [dict(r) for r in rows]})
+
+
 # --------------------------------------------------------------------------- API: itens
 ITEM_SQL = """
     SELECT i.id, i.produto, i.descricao, i.valor_minimo, i.doador_id, d.nome AS doador_nome,
            a.id AS arremate_id, a.valor_arremate, a.arrematante_id, p.nome AS arrematante_nome
       FROM itens i
       LEFT JOIN pessoas d ON d.id = i.doador_id
-      LEFT JOIN arremates a ON a.item_id = i.id
+      LEFT JOIN arremates_vencedores a ON a.item_id = i.id
       LEFT JOIN pessoas p ON p.id = a.arrematante_id
      WHERE i.id = ?"""
 
@@ -245,7 +278,9 @@ def api_criar_item():
 # --------------------------------------------------------------------------- API: arremates
 ULTIMOS_SQL = """
     SELECT a.id, a.item_id, i.produto, a.arrematante_id, p.nome AS arrematante_nome,
-           a.valor_arremate AS valor, a.data_hora
+           a.valor_arremate AS valor, a.data_hora,
+           (a.id = (SELECT b.id FROM arremates b WHERE b.item_id = a.item_id
+                     ORDER BY b.valor_arremate DESC LIMIT 1)) AS lider
       FROM arremates a
       JOIN itens i ON i.id = a.item_id
       JOIN pessoas p ON p.id = a.arrematante_id
@@ -259,8 +294,20 @@ def api_ultimos_arremates():
     return jsonify([dict(r) for r in rows])
 
 
+def lider_do_item(db, item_id):
+    """Maior lance atual do item (ou None)."""
+    row = db.execute(
+        """SELECT a.id, a.valor_arremate AS valor, a.arrematante_id, p.nome AS arrematante_nome
+             FROM arremates a JOIN pessoas p ON p.id = a.arrematante_id
+            WHERE a.item_id = ? ORDER BY a.valor_arremate DESC LIMIT 1""",
+        (item_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 @app.post("/api/arremates")
 def api_criar_arremate():
+    """Registra um lance. Só vale se atingir o mínimo do item E superar o maior lance atual."""
     d = request.get_json(silent=True) or {}
     db = get_db()
 
@@ -275,12 +322,22 @@ def api_criar_arremate():
     if valor is None or valor <= 0:
         return erro("Informe um valor maior que zero.", 422, campo="valor")
 
-    if valor + 1e-9 < item["valor_minimo"] and not d.get("forcar"):
-        return erro(f"Valor abaixo do mínimo ({brl(item['valor_minimo'])}).", 409,
+    # 1) mínimo do item (igual ao mínimo é aceito: o lance "atinge" o mínimo)
+    if valor + 1e-9 < item["valor_minimo"]:
+        return erro(f"O valor não atinge o mínimo do item ({brl(item['valor_minimo'])}).", 409,
                     codigo="abaixo_minimo", valor_minimo=item["valor_minimo"])
 
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
+        db.execute("BEGIN IMMEDIATE")  # trava escrita: dois operadores não furam a fila
+        # 2) precisa ser estritamente maior que o maior lance atual
+        anterior = lider_do_item(db, item["id"])
+        if anterior and valor <= anterior["valor"] + 1e-9:
+            db.rollback()
+            return erro(
+                f"O lance precisa ser maior que o maior lance atual ({brl(anterior['valor'])}, "
+                f"de {anterior['arrematante_nome']}).", 409,
+                codigo="lance_insuficiente", lance_atual=anterior["valor"])
         cur = db.execute(
             "INSERT INTO arremates (item_id, arrematante_id, valor_arremate, data_hora) VALUES (?, ?, ?, ?)",
             (item["id"], pessoa_id, valor, agora),
@@ -288,20 +345,25 @@ def api_criar_arremate():
         db.commit()
     except sqlite3.IntegrityError:
         db.rollback()
-        return erro(f"O item nº {item['id']} já foi arrematado.", 409, codigo="ja_arrematado")
+        return erro("Outro lance do mesmo valor acabou de ser registrado. Confira o valor atual e tente de novo.", 409,
+                    codigo="lance_insuficiente")
 
     row = db.execute(ULTIMOS_SQL.format(where="WHERE a.id = ?", limite=""), (cur.lastrowid,)).fetchone()
-    return jsonify(dict(row)), 201
+    out = dict(row)
+    out["anterior"] = ({"nome": anterior["arrematante_nome"], "valor": anterior["valor"]} if anterior else None)
+    return jsonify(out), 201
 
 
 @app.delete("/api/arremates/<int:aid>")
 def api_excluir_arremate(aid):
+    """Cancela um lance. Se era o maior, o lance anterior volta a ser o vencedor."""
     db = get_db()
-    cur = db.execute("DELETE FROM arremates WHERE id = ?", (aid,))
+    row = db.execute("SELECT item_id FROM arremates WHERE id = ?", (aid,)).fetchone()
+    if row is None:
+        return erro("Lance não encontrado (talvez já tenha sido cancelado).", 404)
+    db.execute("DELETE FROM arremates WHERE id = ?", (aid,))
     db.commit()
-    if cur.rowcount == 0:
-        return erro("Arremate não encontrado (talvez já tenha sido cancelado).", 404)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "item_id": row["item_id"], "lider": lider_do_item(db, row["item_id"])})
 
 
 # --------------------------------------------------------------------------- PDF: nota promissória
@@ -459,12 +521,14 @@ def promissoria(pessoa_id):
         return f"Cadastro nº {pessoa_id} não encontrado.", 404
     arremates = db.execute(
         """SELECT i.id, i.produto, a.valor_arremate
-             FROM arremates a JOIN itens i ON i.id = a.item_id
+             FROM arremates_vencedores a JOIN itens i ON i.id = a.item_id
             WHERE a.arrematante_id = ? ORDER BY i.id""",
         (pessoa_id,),
     ).fetchall()
     pdf = gerar_promissoria_pdf(pessoa, arremates)
-    return send_file(io.BytesIO(pdf), mimetype="application/pdf", download_name=f"promissoria_{pessoa_id}.pdf")
+    resp = send_file(io.BytesIO(pdf), mimetype="application/pdf", download_name=f"promissoria_{pessoa_id}.pdf")
+    resp.headers["Cache-Control"] = "no-store"  # a promissória muda a cada lance
+    return resp
 
 
 if __name__ == "__main__":

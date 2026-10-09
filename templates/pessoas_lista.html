@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Pessoas cadastradas - {{ nome_leilao }}{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+  <h1 class="text-2xl font-extrabold">Pessoas cadastradas</h1>
+  <a href="{{ url_for('pessoas') }}" class="botao botao-sec botao-pequeno">Novo cadastro <kbd>Alt+2</kbd></a>
+</div>
+
+<div class="bg-white rounded-xl border border-tinta/10 p-4 mb-4">
+  <label class="rotulo" for="busca">Buscar por nome (ou número de cadastro)</label>
+  <input id="busca" class="campo campo-grande" autocomplete="off" placeholder="Digite parte do nome" autofocus>
+  <p id="contagem" class="mt-2 text-sm text-tinta/70 min-h-[1.25rem]" aria-live="polite"></p>
+</div>
+
+<div class="bg-white rounded-xl border border-tinta/10 overflow-x-auto">
+  <table class="w-full text-left">
+    <thead class="bg-pinheiro-claro text-sm">
+      <tr>
+        <th class="px-4 py-3">Nº</th>
+        <th class="px-4 py-3">Nome</th>
+        <th class="px-4 py-3">Telefone</th>
+        <th class="px-4 py-3">Função</th>
+        <th class="px-4 py-3 text-right">Itens</th>
+        <th class="px-4 py-3 text-right">Total arrematado</th>
+        <th class="px-4 py-3"><span class="sr-only">Ação</span></th>
+      </tr>
+    </thead>
+    <tbody id="linhas"></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block atalhos %}
+<li><kbd>Setas</kbd> escolhem a pessoa na lista</li>
+<li><kbd>Enter</kbd> abre a promissória da pessoa marcada</li>
+<li><kbd>Esc</kbd> limpa a busca</li>
+<li><kbd>F3</kbd> ou <kbd>/</kbd> volta para a busca</li>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/pessoas_lista.js') }}"></script>{% endblock %}

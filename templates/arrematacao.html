@@ -24,7 +24,11 @@
       <p id="valorPreview" class="mt-1 min-h-[1.5rem] font-semibold"></p>
     </div>
 
-    <button id="btnAdd" type="button" class="botao botao-grande">Adicionar arremate <kbd>Enter</kbd></button>
+    <button id="btnAdd" type="button" class="botao botao-grande">Salvar arremate <kbd>Enter</kbd></button>
+    <label class="flex items-center gap-3 cursor-pointer select-none">
+      <input id="chkPromissoria" type="checkbox" class="h-5 w-5 accent-[#1F5140]" checked>
+      <span>Abrir a nota promissória do arrematante depois de salvar <kbd>F9</kbd></span>
+    </label>
   </section>
 
   <aside class="lg:col-span-2">
@@ -40,24 +44,32 @@
   </aside>
 </div>
 
-<div id="modal" class="hidden fixed inset-0 z-50 items-start justify-center bg-tinta/60 pt-24 px-4" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
-  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 space-y-3">
-    <h2 id="modalTitulo" class="text-xl font-extrabold">Emitir nota promissória</h2>
-    <label class="rotulo" for="pmPessoa">Cliente (número de cadastro ou nome)</label>
-    <div class="relative"><input id="pmPessoa" class="campo campo-grande" autocomplete="off"></div>
+<div id="modal" class="hidden fixed inset-0 z-50 items-start justify-center overflow-y-auto bg-tinta/60 py-6 px-4" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-4xl p-5 space-y-3">
+    <h2 id="modalTitulo" class="text-xl font-extrabold">Nota promissória</h2>
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="flex-1 min-w-[16rem]">
+        <label class="rotulo" for="pmPessoa">Cliente (número de cadastro ou nome)</label>
+        <div class="relative"><input id="pmPessoa" class="campo" autocomplete="off"></div>
+      </div>
+      <button id="pmAbrir" type="button" class="botao">Carregar <kbd>Enter</kbd></button>
+    </div>
     <p id="pmInfo" class="min-h-[1.5rem]" aria-live="polite"></p>
-    <div class="flex gap-3">
-      <button id="pmAbrir" type="button" class="botao">Abrir PDF <kbd>Enter</kbd></button>
+    <iframe id="pmFrame" title="Nota promissória em PDF" class="hidden w-full h-[58vh] border-2 border-tinta/20 rounded-lg bg-papel"></iframe>
+    <div class="flex flex-wrap gap-3">
+      <button id="pmImprimir" type="button" class="botao" disabled>Imprimir</button>
+      <a id="pmNovaAba" href="#" target="_blank" rel="noopener" class="botao botao-sec">Abrir em nova aba</a>
       <button id="pmFechar" type="button" class="botao botao-sec">Fechar <kbd>Esc</kbd></button>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block atalhos %}
-<li><kbd>Enter</kbd> avança de campo e, no valor, adiciona</li>
+<li><kbd>Enter</kbd> avança de campo e, no valor, salva</li>
 <li><kbd>F2</kbd> limpa a tela</li>
-<li><kbd>F4</kbd> cancela o último arremate</li>
-<li><kbd>F8</kbd> promissória do cliente</li>
-<li><kbd>Esc</kbd> corrige um lance abaixo do mínimo</li>
+<li><kbd>F4</kbd> cancela o último lance</li>
+<li><kbd>F8</kbd> promissória de outro cliente</li>
+<li><kbd>F9</kbd> liga ou desliga a promissória automática</li>
+<li><kbd>Esc</kbd> fecha a promissória</li>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/arrematacao.js') }}"></script>{% endblock %}

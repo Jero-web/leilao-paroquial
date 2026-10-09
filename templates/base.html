@@ -31,6 +31,7 @@
     .botao:hover { background:#143629; }
     .botao:focus-visible { outline:none; box-shadow:0 0 0 4px rgba(185,133,31,.55); }
     .botao:disabled { opacity:.6; }
+    .botao-pequeno { padding:.4rem .8rem; font-size:.95rem; }
     .botao-grande { width:100%; justify-content:center; font-size:1.25rem; padding:.9rem 1.2rem; }
     .botao-sec { background:#fff; color:#1F5140; border:2px solid #1F5140; }
     .botao-sec:hover { background:#DCE9E1; }
@@ -50,8 +51,8 @@
   <header class="bg-pinheiro text-white">
     <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
       <a href="{{ url_for('arrematacao') }}" class="text-xl font-extrabold tracking-tight">{{ nome_leilao }}</a>
-      <nav class="flex gap-1" aria-label="Telas">
-        {% for ep, rotulo, tecla in [('arrematacao', 'Arrematação', '1'), ('pessoas', 'Pessoas', '2'), ('itens', 'Itens', '3')] %}
+      <nav class="flex flex-wrap gap-1" aria-label="Telas">
+        {% for ep, rotulo, tecla in [('arrematacao', 'Arrematação', '1'), ('pessoas', 'Cadastro', '2'), ('itens', 'Itens', '3'), ('pessoas_lista', 'Pessoas cadastradas', '4')] %}
         <a href="{{ url_for(ep) }}" data-code="Digit{{ tecla }}"
            class="px-3 py-2 rounded-md font-semibold {{ 'bg-white text-pinheiro' if request.endpoint == ep else 'hover:bg-pinheiro-escuro' }}"
            {% if request.endpoint == ep %}aria-current="page"{% endif %}>{{ rotulo }} <kbd>Alt+{{ tecla }}</kbd></a>

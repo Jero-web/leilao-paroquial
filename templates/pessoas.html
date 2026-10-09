@@ -3,7 +3,10 @@
 {% block content %}
 <div class="grid gap-6 lg:grid-cols-5">
   <section class="lg:col-span-3">
-    <h1 class="text-2xl font-extrabold mb-4">Cadastro de pessoas</h1>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <h1 class="text-2xl font-extrabold">Cadastro de pessoas</h1>
+      <a href="{{ url_for('pessoas_lista') }}" class="botao botao-sec botao-pequeno">Ver pessoas cadastradas <kbd>Alt+4</kbd></a>
+    </div>
     <form id="form" autocomplete="off" novalidate class="space-y-4 bg-white rounded-xl p-5 border border-tinta/10">
       <div>
         <label class="rotulo" for="nome">Nome</label>

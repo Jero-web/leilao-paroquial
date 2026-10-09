@@ -2,14 +2,18 @@
   const { $, api, brl, esc, parseValor, PessoaPicker } = window.Leilao;
   const ordemEl = $('#ordem'), arrEl = $('#arrematante'), valorEl = $('#valor');
   const itemCard = $('#itemCard'), feedback = $('#feedback'), valorPrev = $('#valorPreview');
-  const tbody = $('#ultimos'), btn = $('#btnAdd');
+  const tbody = $('#ultimos'), btn = $('#btnAdd'), chk = $('#chkPromissoria');
 
-  let item = null;         // último item consultado
-  let forcar = false;      // lance abaixo do mínimo aguardando confirmação
+  let item = null;         // último item consultado (inclui o maior lance atual em item.arrematado)
   let enviando = false;
   let ultimaPessoa = null; // base para o F8
   let ultimos = [];
   let avisoTimer = null;
+
+  // "Abrir promissória ao salvar" fica ligado por padrão e lembra a escolha deste computador.
+  const CHAVE = 'leilao.abrirPromissoria';
+  try { chk.checked = localStorage.getItem(CHAVE) !== '0'; } catch (_) { /* storage indisponível */ }
+  chk.addEventListener('change', () => { try { localStorage.setItem(CHAVE, chk.checked ? '1' : '0'); } catch (_) {} });
 
   const picker = PessoaPicker(arrEl, $('#arrInfo'), { onSelect: () => { valorEl.focus(); valorEl.select(); } });
 
@@ -29,13 +33,12 @@
     }
   }
 
-  // ------------------------------------------------------------------ item
+  // ------------------------------------------------------------------ item e regras do lance
   function pintarItem(estado, it, msg) {
     const base = 'rounded-xl p-4 min-h-[8rem] ';
-    if (estado === 'ok' || estado === 'vendido') {
-      const vendido = estado === 'vendido';
-      itemCard.className = base + (vendido ? 'bg-ouro-claro border-2 border-ouro' : 'bg-white border-2 border-pinheiro');
-      const a = it.arrematado;
+    if (estado === 'ok') {
+      itemCard.className = base + 'bg-white border-2 border-pinheiro';
+      const l = it.arrematado;
       itemCard.innerHTML =
         `<p class="text-sm text-tinta/70">Item nº ${it.id}</p>` +
         `<p class="text-2xl font-bold break-words">${esc(it.produto)}</p>` +
@@ -44,76 +47,104 @@
           `<span>Valor mínimo <strong>${brl(it.valor_minimo)}</strong></span>` +
           (it.doador_nome ? `<span>Doador <strong>${esc(it.doador_nome)}</strong></span>` : '') +
         `</div>` +
-        (vendido ? `<p class="mt-3 font-bold text-tijolo">Já arrematado por ${esc(a.arrematante_nome)} (nº ${a.arrematante_id}) por ${brl(a.valor)}. ` +
-                   `Cancele esse arremate para lançar de novo.</p>` : '');
+        (l
+          ? `<div class="mt-3 rounded-lg bg-ouro-claro border-2 border-ouro px-3 py-2">` +
+              `<span class="font-semibold">Maior lance atual:</span> <strong class="tabular-nums">${brl(l.valor)}</strong> ` +
+              `de ${esc(l.arrematante_nome)} (nº ${l.arrematante_id}). O novo lance precisa ser maior.</div>`
+          : `<p class="mt-3 text-tinta/70">Sem lances ainda. O primeiro lance precisa atingir o valor mínimo.</p>`);
     } else if (estado === 'erro') {
       itemCard.className = base + 'bg-tijolo-claro border-2 border-tijolo';
       itemCard.innerHTML = `<p class="text-lg font-bold text-tijolo">${esc(msg)}</p>`;
     } else {
       itemCard.className = base + 'border-2 border-dashed border-tinta/25';
-      itemCard.innerHTML = '<p class="text-tinta/70">Digite o número de ordem e aperte Enter ou Tab. A descrição e o valor mínimo aparecem aqui.</p>';
+      itemCard.innerHTML = '<p class="text-tinta/70">Digite o número de ordem e aperte Enter ou Tab. A descrição, o valor mínimo e o maior lance atual aparecem aqui.</p>';
     }
+  }
+
+  // Mesma regra do servidor: atingir o mínimo (igual vale) e superar o maior lance atual.
+  function problemaValor(v) {
+    if (!item) return null;
+    if (v < item.valor_minimo - 1e-9) return `não atinge o mínimo do item (${brl(item.valor_minimo)})`;
+    const l = item.arrematado;
+    if (l && v <= l.valor + 1e-9) return `precisa ser maior que o maior lance atual (${brl(l.valor)})`;
+    return null;
+  }
+
+  function dicaValor() {
+    const l = item?.arrematado;
+    valorEl.placeholder = l ? 'acima de ' + brl(l.valor)
+      : (item && item.valor_minimo > 0 ? 'mínimo ' + brl(item.valor_minimo) : '0,00');
   }
 
   async function resolverItem() {
     const v = ordemEl.value.trim();
-    if (!v) { item = null; pintarItem('vazio'); return null; }
+    if (!v) { item = null; pintarItem('vazio'); dicaValor(); return null; }
     if (!/^\d+$/.test(v)) { item = null; pintarItem('erro', null, 'O número de ordem deve ter só dígitos.'); return null; }
     if (!item || String(item.id) !== v) {
       const r = await api('/api/item/' + v);
-      if (!r.ok) { item = null; pintarItem('erro', null, r.data?.erro || 'Item não encontrado.'); return null; }
+      if (!r.ok) { item = null; pintarItem('erro', null, r.data?.erro || 'Item não encontrado.'); dicaValor(); return null; }
       item = r.data;
-      valorEl.placeholder = item.valor_minimo > 0 ? 'mínimo ' + brl(item.valor_minimo) : '0,00';
     }
-    if (item.arrematado) { pintarItem('vendido', item); return null; }
     pintarItem('ok', item);
+    dicaValor();
+    atualizarPreview();
     return item;
+  }
+
+  function atualizarPreview() {
+    const v = parseValor(valorEl.value);
+    if (v !== null && v > 0) {
+      const prob = problemaValor(v);
+      valorPrev.textContent = brl(v) + (prob ? ` (${prob})` : '');
+      valorPrev.className = 'mt-1 min-h-[1.5rem] font-semibold ' + (prob ? 'text-tijolo' : 'text-pinheiro');
+    } else {
+      valorPrev.textContent = '';
+    }
   }
 
   // ------------------------------------------------------------------ limpeza
   function limparCampos() {
-    ordemEl.value = ''; valorEl.value = ''; valorEl.placeholder = '0,00';
+    ordemEl.value = ''; valorEl.value = '';
     picker.limpar();
-    valorPrev.textContent = ''; valorPrev.className = 'mt-1 min-h-[1.5rem] font-semibold';
-    item = null; forcar = false;
-    pintarItem('vazio');
+    valorPrev.textContent = '';
+    item = null;
+    pintarItem('vazio'); dicaValor();
   }
   function irParaOrdem() { ordemEl.focus(); ordemEl.select(); }
 
-  // ------------------------------------------------------------------ lançar arremate
-  async function adicionar() {
+  // ------------------------------------------------------------------ salvar arremate
+  async function salvar() {
     if (enviando) return;
     enviando = true; btn.disabled = true;
     try {
+      item = null;                      // sempre confere o maior lance atual antes de salvar
       const it = await resolverItem();
       if (!it) { irParaOrdem(); return; }
       const p = await picker.resolver();
       if (!p) { arrEl.focus(); arrEl.select(); return; }
       const v = parseValor(valorEl.value);
       if (v === null || v <= 0) { aviso('erro', 'Informe o valor do arremate.'); valorEl.focus(); valorEl.select(); return; }
+      const prob = problemaValor(v);
+      if (prob) { aviso('erro', `Lance recusado: o valor ${prob}.`); valorEl.focus(); valorEl.select(); return; }
 
       const r = await api('/api/arremates', {
         method: 'POST',
-        body: JSON.stringify({ item_id: it.id, arrematante_id: p.id, valor: valorEl.value, forcar }),
+        body: JSON.stringify({ item_id: it.id, arrematante_id: p.id, valor: valorEl.value }),
       });
       if (r.ok) {
         const a = r.data;
         ultimaPessoa = p;
+        const abrir = chk.checked;
         limparCampos();
-        aviso('ok', `Arrematado: item ${a.item_id} (${a.produto}) para ${a.arrematante_nome}, nº ${a.arrematante_id}, por ${brl(a.valor)}`);
+        aviso('ok', `Novo maior lance do item ${a.item_id} (${a.produto}): ${a.arrematante_nome}, nº ${a.arrematante_id}, ${brl(a.valor)}.` +
+                    (a.anterior ? ` Superou ${a.anterior.nome} (${brl(a.anterior.valor)}).` : ''));
         carregarUltimos();
-        ordemEl.focus();
+        if (abrir) abrirPromissoria(p); else ordemEl.focus();
         return;
       }
-      if (r.status === 409 && r.data?.codigo === 'abaixo_minimo') {
-        forcar = true;
-        aviso('aviso', `${r.data.erro} Enter confirma assim mesmo, Esc deixa corrigir.`);
-        valorEl.focus();
-        return;
-      }
-      if (r.data?.codigo === 'ja_arrematado') item = null;
       aviso('erro', r.data?.erro || 'Não foi possível registrar o arremate.');
-      if (r.data?.campo === 'valor') { valorEl.focus(); valorEl.select(); } else irParaOrdem();
+      if (r.data?.codigo) { item = null; await resolverItem(); }   // alguém pode ter dado outro lance: atualiza o cartão
+      if (r.data?.campo === 'valor' || r.data?.codigo) { valorEl.focus(); valorEl.select(); } else irParaOrdem();
     } finally {
       enviando = false; btn.disabled = false;
     }
@@ -129,11 +160,12 @@
       `<tr class="border-t border-tinta/10">` +
         `<td class="px-3 py-2 align-top"><span class="font-bold tabular-nums">${a.item_id}</span></td>` +
         `<td class="px-3 py-2"><div class="font-semibold break-words">${esc(a.produto)}</div>` +
-          `<div class="text-sm text-tinta/70">${esc(a.arrematante_nome)} (nº ${a.arrematante_id})</div></td>` +
+          `<div class="text-sm text-tinta/70">${esc(a.arrematante_nome)} (nº ${a.arrematante_id})` +
+          (a.lider ? '' : ' <span class="font-semibold text-tijolo">lance superado</span>') + `</div></td>` +
         `<td class="px-3 py-2 text-right font-bold tabular-nums whitespace-nowrap">${brl(a.valor)}</td>` +
         `<td class="px-3 py-2 text-right"><button type="button" data-id="${a.id}" ` +
           `class="text-tijolo font-semibold underline focus:outline-none focus-visible:ring-4 focus-visible:ring-ouro rounded" ` +
-          `aria-label="Cancelar arremate do item ${a.item_id}">Cancelar</button></td>` +
+          `aria-label="Cancelar lance do item ${a.item_id}">Cancelar</button></td>` +
       `</tr>`).join('');
   }
   async function carregarUltimos() {
@@ -142,10 +174,19 @@
     renderUltimos();
   }
   async function cancelar(a) {
-    if (!a || !confirm(`Cancelar o arremate do item ${a.item_id} (${a.produto}) para ${a.arrematante_nome}?`)) { ordemEl.focus(); return; }
+    if (!a) { ordemEl.focus(); return; }
+    const aviso1 = a.lider ? ' O lance anterior do item, se houver, volta a valer.' : '';
+    if (!confirm(`Cancelar o lance de ${brl(a.valor)} de ${a.arrematante_nome} no item ${a.item_id} (${a.produto})?${aviso1}`)) { ordemEl.focus(); return; }
     const r = await api('/api/arremates/' + a.id, { method: 'DELETE' });
     item = null;
-    aviso(r.ok ? 'aviso' : 'erro', r.ok ? `Arremate do item ${a.item_id} cancelado. O item pode ser lançado de novo.` : (r.data?.erro || 'Não foi possível cancelar.'));
+    if (r.ok) {
+      const l = r.data.lider;
+      aviso('aviso', `Lance cancelado. ` + (l
+        ? `Maior lance atual do item ${a.item_id}: ${brl(l.valor)} de ${l.arrematante_nome}.`
+        : `O item ${a.item_id} está sem lances.`));
+    } else {
+      aviso('erro', r.data?.erro || 'Não foi possível cancelar.');
+    }
     await carregarUltimos();
     if (ordemEl.value.trim()) resolverItem();
     irParaOrdem();
@@ -156,7 +197,7 @@
   });
 
   // ------------------------------------------------------------------ campos e Enter
-  ordemEl.addEventListener('input', () => { item = null; forcar = false; });
+  ordemEl.addEventListener('input', () => { item = null; });
   ordemEl.addEventListener('blur', () => { if (ordemEl.value.trim()) resolverItem(); });
   ordemEl.addEventListener('keydown', async e => {
     if (e.key !== 'Enter' || e.defaultPrevented) return;
@@ -164,66 +205,83 @@
     if (await resolverItem()) { arrEl.focus(); arrEl.select(); }
   });
 
-  arrEl.addEventListener('input', () => { forcar = false; });
   arrEl.addEventListener('keydown', async e => { // texto: a lista (autocomplete) trata o Enter antes deste
     if (e.key !== 'Enter' || e.defaultPrevented) return;
     e.preventDefault();
     if (await picker.resolver()) { valorEl.focus(); valorEl.select(); }
   });
 
-  valorEl.addEventListener('input', () => {
-    forcar = false;
-    const v = parseValor(valorEl.value);
-    if (v !== null && v > 0) {
-      const abaixo = item && v < item.valor_minimo;
-      valorPrev.textContent = brl(v) + (abaixo ? ' (abaixo do mínimo)' : '');
-      valorPrev.className = 'mt-1 min-h-[1.5rem] font-semibold ' + (abaixo ? 'text-tijolo' : 'text-pinheiro');
-    } else {
-      valorPrev.textContent = '';
-    }
-  });
+  valorEl.addEventListener('input', atualizarPreview);
   valorEl.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || e.ctrlKey || e.shiftKey) return;
     e.preventDefault();
-    adicionar();
+    salvar();
   });
-  btn.addEventListener('click', adicionar);
+  btn.addEventListener('click', salvar);
 
-  // ------------------------------------------------------------------ F8: promissória
-  const modal = $('#modal'), pmEl = $('#pmPessoa');
-  const pm = PessoaPicker(pmEl, $('#pmInfo'));
+  // ------------------------------------------------------------------ promissória (modal com PDF)
+  const modal = $('#modal'), pmEl = $('#pmPessoa'), frame = $('#pmFrame');
+  const pmImprimir = $('#pmImprimir'), pmNova = $('#pmNovaAba');
+  let esperandoPdf = false;
+  const pm = PessoaPicker(pmEl, $('#pmInfo'), { onSelect: p => carregarPdf(p) });
   const modalAberto = () => !modal.classList.contains('hidden');
 
-  async function abrirModal() {
+  function carregarPdf(p) {
+    const url = '/promissoria/' + p.id;
+    pmNova.href = url;
+    pmImprimir.disabled = true;
+    esperandoPdf = true;
+    frame.classList.remove('hidden');
+    frame.src = url + '?v=' + Date.now();  // evita PDF antigo em cache
+  }
+  frame.addEventListener('load', () => {
+    if (!esperandoPdf) return;
+    esperandoPdf = false;
+    pmImprimir.disabled = false;
+    setTimeout(() => pmImprimir.focus(), 150); // o leitor de PDF costuma roubar o foco: devolve ao botão
+  });
+
+  function mostrarModal() { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+  function abrirPromissoria(p) {         // chamado logo após salvar: já mostra o PDF do arrematante
+    pm.limpar(); pm.definir(p);
+    mostrarModal();
+    carregarPdf(p);
+  }
+  async function abrirModalF8() {        // escolher outro cliente
     let base = picker.atual;
     if (!base && arrEl.value.trim()) base = await picker.resolver();
     base = base || ultimaPessoa;
     pm.limpar();
     if (base) pm.definir(base);
-    modal.classList.remove('hidden'); modal.classList.add('flex');
+    mostrarModal();
     pmEl.focus(); pmEl.select();
   }
   function fecharModal() {
     modal.classList.add('hidden'); modal.classList.remove('flex');
+    esperandoPdf = false;
+    frame.src = 'about:blank'; frame.classList.add('hidden');
+    pmImprimir.disabled = true;
     irParaOrdem();
   }
-  async function abrirPdf() {
+  async function carregarDoCampo() {
     const p = await pm.resolver();
-    if (!p) { pmEl.focus(); return; }
-    window.open('/promissoria/' + p.id, '_blank');
-    fecharModal();
+    if (p) carregarPdf(p); else pmEl.focus();
   }
   pmEl.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || e.defaultPrevented) return;
     e.preventDefault();
-    abrirPdf();
+    carregarDoCampo();
   });
-  $('#pmAbrir').addEventListener('click', abrirPdf);
+  $('#pmAbrir').addEventListener('click', carregarDoCampo);
   $('#pmFechar').addEventListener('click', fecharModal);
+  pmImprimir.addEventListener('click', () => {
+    try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+    catch (_) { window.open(pmNova.href, '_blank'); }
+  });
   modal.addEventListener('mousedown', e => { if (e.target === modal) fecharModal(); });
   modal.addEventListener('keydown', e => { // mantém o Tab dentro do modal
     if (e.key !== 'Tab') return;
-    const foc = [...modal.querySelectorAll('input, button')];
+    const foc = [...modal.querySelectorAll('input, button:not(:disabled), a[href]')];
     const primeiro = foc[0], ultimo = foc[foc.length - 1];
     if (e.shiftKey && document.activeElement === primeiro) { e.preventDefault(); ultimo.focus(); }
     else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primeiro.focus(); }
@@ -231,18 +289,19 @@
 
   // ------------------------------------------------------------------ atalhos globais
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      if (modalAberto()) { e.preventDefault(); fecharModal(); }
-      else if (forcar) { e.preventDefault(); forcar = false; aviso(null); valorEl.focus(); valorEl.select(); }
-      return;
-    }
+    if (e.key === 'Escape' && modalAberto()) { e.preventDefault(); fecharModal(); return; }
+    if (e.key === 'F8') { e.preventDefault(); if (modalAberto()) { pmEl.focus(); pmEl.select(); } else abrirModalF8(); return; }
     if (modalAberto()) return;
     if (e.key === 'F2') { e.preventDefault(); limparCampos(); aviso(null); irParaOrdem(); }
     else if (e.key === 'F4') { e.preventDefault(); cancelar(ultimos[0]); }
-    else if (e.key === 'F8') { e.preventDefault(); abrirModal(); }
+    else if (e.key === 'F9') {
+      e.preventDefault();
+      chk.checked = !chk.checked; chk.dispatchEvent(new Event('change'));
+      aviso('aviso', chk.checked ? 'A promissória vai abrir depois de cada arremate salvo.' : 'A promissória não vai mais abrir sozinha (F8 abre quando precisar).');
+    }
   });
 
-  pintarItem('vazio');
+  pintarItem('vazio'); dicaValor();
   carregarUltimos();
   ordemEl.focus();
 })();
