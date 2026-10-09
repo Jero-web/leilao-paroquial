@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ nome_leilao }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  {% raw %}
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        fontFamily: { sans: ['"Public Sans"', 'system-ui', '"Segoe UI"', 'sans-serif'] },
+        colors: {
+          papel: '#F1F3EE', tinta: '#1B2A23',
+          pinheiro: { DEFAULT: '#1F5140', escuro: '#143629', claro: '#DCE9E1' },
+          ouro: { DEFAULT: '#B9851F', claro: '#F6E7C4' },
+          tijolo: { DEFAULT: '#A8392B', claro: '#F7DAD5' }
+        }
+      } }
+    };
+  </script>
+  <style>
+    .rotulo { display:block; font-weight:600; font-size:.95rem; margin-bottom:.25rem; }
+    .campo { width:100%; background:#fff; border:2px solid #A9B8AF; border-radius:.5rem; padding:.6rem .8rem; font-size:1.125rem; }
+    .campo:focus { outline:none; border-color:#1F5140; box-shadow:0 0 0 4px rgba(31,81,64,.22); }
+    .campo-grande { font-size:1.875rem; font-weight:700; font-variant-numeric:tabular-nums; padding:.5rem .9rem; }
+    .botao { display:inline-flex; align-items:center; gap:.6rem; background:#1F5140; color:#fff; font-weight:700; border-radius:.5rem; padding:.7rem 1.2rem; font-size:1.05rem; }
+    .botao:hover { background:#143629; }
+    .botao:focus-visible { outline:none; box-shadow:0 0 0 4px rgba(185,133,31,.55); }
+    .botao:disabled { opacity:.6; }
+    .botao-grande { width:100%; justify-content:center; font-size:1.25rem; padding:.9rem 1.2rem; }
+    .botao-sec { background:#fff; color:#1F5140; border:2px solid #1F5140; }
+    .botao-sec:hover { background:#DCE9E1; }
+    kbd { display:inline-block; padding:0 .4rem; border:1px solid rgba(27,42,35,.35); border-bottom-width:2px; border-radius:.3rem; font-size:.75rem; font-weight:600; background:#fff; color:#1B2A23; }
+    .ac-list { position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:30; background:#fff; border:2px solid #1F5140; border-radius:.5rem; box-shadow:0 12px 28px rgba(27,42,35,.18); max-height:18rem; overflow:auto; }
+    .ac-item { display:flex; gap:.75rem; align-items:baseline; padding:.55rem .8rem; font-size:1.05rem; cursor:pointer; }
+    .ac-active { background:#DCE9E1; }
+    .ac-num { font-weight:800; min-width:2.5rem; font-variant-numeric:tabular-nums; color:#1F5140; }
+    .ac-meta { margin-left:auto; font-size:.8rem; color:#5c6b63; }
+    @keyframes pulsar { 0% { transform:scale(.98); box-shadow:0 0 0 0 rgba(185,133,31,.7); } 100% { transform:scale(1); box-shadow:0 0 0 18px rgba(185,133,31,0); } }
+    .flash { animation:pulsar .7s ease-out; }
+    @media (prefers-reduced-motion: reduce) { .flash { animation:none; } }
+  </style>
+  {% endraw %}
+</head>
+<body class="bg-papel text-tinta font-sans antialiased min-h-screen">
+  <header class="bg-pinheiro text-white">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <a href="{{ url_for('arrematacao') }}" class="text-xl font-extrabold tracking-tight">{{ nome_leilao }}</a>
+      <nav class="flex gap-1" aria-label="Telas">
+        {% for ep, rotulo, tecla in [('arrematacao', 'Arrematação', '1'), ('pessoas', 'Pessoas', '2'), ('itens', 'Itens', '3')] %}
+        <a href="{{ url_for(ep) }}" data-code="Digit{{ tecla }}"
+           class="px-3 py-2 rounded-md font-semibold {{ 'bg-white text-pinheiro' if request.endpoint == ep else 'hover:bg-pinheiro-escuro' }}"
+           {% if request.endpoint == ep %}aria-current="page"{% endif %}>{{ rotulo }} <kbd>Alt+{{ tecla }}</kbd></a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    {% block content %}{% endblock %}
+    <ul class="mt-8 pt-4 border-t border-tinta/15 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+      {% block atalhos %}{% endblock %}
+    </ul>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Arrematação - {{ nome_leilao }}{% endblock %}
+{% block content %}
+<div class="grid gap-6 lg:grid-cols-5">
+  <section class="lg:col-span-3 space-y-4" aria-label="Lançar arremate">
+    <h1 class="text-2xl font-extrabold">Arrematação</h1>
+    <div id="feedback" role="status" aria-live="polite" class="min-h-[4rem]"></div>
+
+    <div>
+      <label class="rotulo" for="ordem">Número de ordem</label>
+      <input id="ordem" class="campo campo-grande" inputmode="numeric" autocomplete="off" autofocus>
+    </div>
+    <div id="itemCard" class="rounded-xl p-4 min-h-[8rem]" aria-live="polite"></div>
+
+    <div>
+      <label class="rotulo" for="arrematante">Arrematante (número de cadastro ou nome)</label>
+      <div class="relative"><input id="arrematante" class="campo campo-grande" autocomplete="off"></div>
+      <p id="arrInfo" class="mt-1 min-h-[1.5rem]" aria-live="polite"></p>
+    </div>
+
+    <div>
+      <label class="rotulo" for="valor">Valor do arremate</label>
+      <input id="valor" class="campo campo-grande" inputmode="decimal" autocomplete="off" placeholder="0,00">
+      <p id="valorPreview" class="mt-1 min-h-[1.5rem] font-semibold"></p>
+    </div>
+
+    <button id="btnAdd" type="button" class="botao botao-grande">Adicionar arremate <kbd>Enter</kbd></button>
+  </section>
+
+  <aside class="lg:col-span-2">
+    <h2 class="text-xl font-extrabold mb-3">Últimas 5 arrematações</h2>
+    <div class="bg-white rounded-xl border border-tinta/10 overflow-hidden">
+      <table class="w-full text-left">
+        <thead class="bg-pinheiro-claro text-sm">
+          <tr><th class="px-3 py-2">Item</th><th class="px-3 py-2">Arrematante</th><th class="px-3 py-2 text-right">Valor</th><th class="px-3 py-2"><span class="sr-only">Ação</span></th></tr>
+        </thead>
+        <tbody id="ultimos"></tbody>
+      </table>
+    </div>
+  </aside>
+</div>
+
+<div id="modal" class="hidden fixed inset-0 z-50 items-start justify-center bg-tinta/60 pt-24 px-4" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 space-y-3">
+    <h2 id="modalTitulo" class="text-xl font-extrabold">Emitir nota promissória</h2>
+    <label class="rotulo" for="pmPessoa">Cliente (número de cadastro ou nome)</label>
+    <div class="relative"><input id="pmPessoa" class="campo campo-grande" autocomplete="off"></div>
+    <p id="pmInfo" class="min-h-[1.5rem]" aria-live="polite"></p>
+    <div class="flex gap-3">
+      <button id="pmAbrir" type="button" class="botao">Abrir PDF <kbd>Enter</kbd></button>
+      <button id="pmFechar" type="button" class="botao botao-sec">Fechar <kbd>Esc</kbd></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block atalhos %}
+<li><kbd>Enter</kbd> avança de campo e, no valor, adiciona</li>
+<li><kbd>F2</kbd> limpa a tela</li>
+<li><kbd>F4</kbd> cancela o último arremate</li>
+<li><kbd>F8</kbd> promissória do cliente</li>
+<li><kbd>Esc</kbd> corrige um lance abaixo do mínimo</li>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/arrematacao.js') }}"></script>{% endblock %}

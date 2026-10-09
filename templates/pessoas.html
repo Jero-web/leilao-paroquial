@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Cadastro de pessoas - {{ nome_leilao }}{% endblock %}
+{% block content %}
+<div class="grid gap-6 lg:grid-cols-5">
+  <section class="lg:col-span-3">
+    <h1 class="text-2xl font-extrabold mb-4">Cadastro de pessoas</h1>
+    <form id="form" autocomplete="off" novalidate class="space-y-4 bg-white rounded-xl p-5 border border-tinta/10">
+      <div>
+        <label class="rotulo" for="nome">Nome</label>
+        <input id="nome" class="campo" maxlength="120" autofocus required>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="rotulo" for="cpf">CPF</label>
+          <input id="cpf" class="campo" inputmode="numeric" placeholder="000.000.000-00">
+        </div>
+        <div>
+          <label class="rotulo" for="telefone">Telefone</label>
+          <input id="telefone" class="campo" inputmode="tel" placeholder="(00) 00000-0000">
+        </div>
+      </div>
+      <div>
+        <label class="rotulo" for="endereco">Endereço</label>
+        <input id="endereco" class="campo" maxlength="200">
+      </div>
+      <div>
+        <label class="rotulo" for="funcao">Função</label>
+        <select id="funcao" class="campo">
+          <option value="CLIENTE">Cliente</option>
+          <option value="COMISSAO">Membro da comissão</option>
+        </select>
+      </div>
+      <div id="msg" role="alert" class="min-h-[1.5rem] text-tijolo font-semibold"></div>
+      <button type="submit" class="botao">Salvar cadastro <kbd>Enter</kbd></button>
+    </form>
+  </section>
+
+  <aside class="lg:col-span-2" aria-live="polite">
+    <div id="vazio" class="rounded-2xl border-2 border-dashed border-tinta/25 p-8 text-center text-tinta/70">
+      O número de cadastro aparece aqui assim que você salvar.
+    </div>
+    <div id="cartao" class="hidden rounded-2xl bg-pinheiro text-white p-3">
+      <div class="rounded-xl border-4 border-dashed border-ouro px-6 py-8 text-center">
+        <p class="text-lg font-semibold text-white/80">Número de cadastro</p>
+        <p id="cartaoNumero" class="text-8xl font-extrabold tabular-nums leading-none my-3">0</p>
+        <p id="cartaoNome" class="text-2xl font-bold break-words"></p>
+        <p id="cartaoFuncao" class="text-white/80"></p>
+        <a id="cartaoLink" target="_blank" rel="noopener" class="inline-block mt-4 underline font-semibold">Abrir promissória</a>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block atalhos %}
+<li><kbd>Enter</kbd> avança de campo e, no último, salva</li>
+<li><kbd>Ctrl+Enter</kbd> salva de qualquer campo</li>
+<li><kbd>F2</kbd> limpa o formulário</li>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/pessoas.js') }}"></script>{% endblock %}

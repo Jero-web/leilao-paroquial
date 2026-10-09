@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Cadastro de itens - {{ nome_leilao }}{% endblock %}
+{% block content %}
+<div class="grid gap-6 lg:grid-cols-5">
+  <section class="lg:col-span-3">
+    <h1 class="text-2xl font-extrabold mb-4">Cadastro de itens</h1>
+    <form id="form" autocomplete="off" novalidate class="space-y-4 bg-white rounded-xl p-5 border border-tinta/10">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="rotulo" for="ordem">Número de ordem</label>
+          <input id="ordem" class="campo campo-grande" inputmode="numeric" value="{{ proximo }}" autofocus>
+        </div>
+        <div>
+          <label class="rotulo" for="valor_minimo">Valor mínimo (R$)</label>
+          <input id="valor_minimo" class="campo campo-grande" inputmode="decimal" placeholder="0,00">
+        </div>
+      </div>
+      <div>
+        <label class="rotulo" for="produto">Produto</label>
+        <input id="produto" class="campo" maxlength="120">
+      </div>
+      <div>
+        <label class="rotulo" for="descricao">Descrição</label>
+        <input id="descricao" class="campo" maxlength="300">
+      </div>
+      <div>
+        <label class="rotulo" for="doador">Doador (número de cadastro ou nome, opcional)</label>
+        <div class="relative"><input id="doador" class="campo"></div>
+        <p id="doadorInfo" class="mt-1 min-h-[1.5rem]" aria-live="polite"></p>
+      </div>
+      <div id="msg" role="alert" class="min-h-[1.5rem] text-tijolo font-semibold"></div>
+      <button type="submit" class="botao">Salvar item <kbd>Enter</kbd></button>
+    </form>
+  </section>
+
+  <aside class="lg:col-span-2" aria-live="polite">
+    <div id="vazio" class="rounded-2xl border-2 border-dashed border-tinta/25 p-8 text-center text-tinta/70">
+      O item salvo aparece aqui, e o próximo número de ordem já fica preenchido.
+    </div>
+    <div id="cartao" class="hidden rounded-2xl bg-pinheiro text-white p-3">
+      <div class="rounded-xl border-4 border-dashed border-ouro px-6 py-8 text-center">
+        <p class="text-lg font-semibold text-white/80">Item cadastrado</p>
+        <p id="cartaoNumero" class="text-8xl font-extrabold tabular-nums leading-none my-3">0</p>
+        <p id="cartaoProduto" class="text-2xl font-bold break-words"></p>
+        <p id="cartaoMin" class="text-white/80"></p>
+        <p id="cartaoDoador" class="text-white/80"></p>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block atalhos %}
+<li><kbd>Enter</kbd> avança de campo e, no último, salva</li>
+<li><kbd>Ctrl+Enter</kbd> salva de qualquer campo</li>
+<li><kbd>F2</kbd> limpa o formulário</li>
+<li><kbd>Setas</kbd> escolhem o doador na lista</li>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/itens.js') }}"></script>{% endblock %}
