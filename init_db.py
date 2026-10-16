@@ -15,6 +15,24 @@ def migrar(conn):
     colunas = [r[1] for r in conn.execute("PRAGMA table_info(itens)")]
     if colunas and "tipo_id" not in colunas:
         conn.execute("ALTER TABLE itens ADD COLUMN tipo_id INTEGER REFERENCES tipos_item (id)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS pagamentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            arrematante_id INTEGER NOT NULL REFERENCES pessoas (id),
+            valor_total_devedor REAL NOT NULL,
+            valor_pix REAL NOT NULL DEFAULT 0.00,
+            valor_especie REAL NOT NULL DEFAULT 0.00,
+            valor_pago_total REAL NOT NULL,
+            saldo_restante REAL NOT NULL,
+            observacao_pendencia TEXT,
+            status TEXT NOT NULL CHECK (status IN ('LIQUIDADO', 'PENDENTE')),
+            data_pagamento DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    conn.execute(
+        """CREATE INDEX IF NOT EXISTS idx_pagamentos_arrematante
+           ON pagamentos (arrematante_id, data_pagamento DESC, id DESC)"""
+    )
     conn.commit()
 
 

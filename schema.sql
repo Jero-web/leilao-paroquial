@@ -37,6 +37,22 @@ CREATE TABLE IF NOT EXISTS arremates (
     data_hora       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     doado           INTEGER NOT NULL DEFAULT 0 CHECK (doado IN (0, 1))
 );
+
+CREATE TABLE IF NOT EXISTS pagamentos (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    arrematante_id      INTEGER NOT NULL REFERENCES pessoas (id),
+    valor_total_devedor REAL NOT NULL,
+    valor_pix           REAL NOT NULL DEFAULT 0.00,
+    valor_especie       REAL NOT NULL DEFAULT 0.00,
+    valor_pago_total    REAL NOT NULL,
+    saldo_restante      REAL NOT NULL,
+    observacao_pendencia TEXT,
+    status              TEXT NOT NULL CHECK (status IN ('LIQUIDADO', 'PENDENTE')),
+    data_pagamento      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pagamentos_arrematante
+    ON pagamentos (arrematante_id, data_pagamento DESC, id DESC);
+
 -- Cada linha é um lance. Dentro de uma "rodada" o valor só cresce, então o último lance do item é o maior.
 -- doado = 1: o arrematante doou o item de volta. A venda continua valendo (e fica na promissória dele,
 -- marcada com D), a rodada se encerra e o item volta ao leilão a partir do valor mínimo.

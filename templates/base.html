@@ -54,7 +54,7 @@
     <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
       <a href="{{ url_for('arrematacao') }}" class="text-xl font-extrabold tracking-tight">{{ nome_leilao }}</a>
       <nav class="flex flex-wrap gap-1" aria-label="Telas">
-        {% for ep, rotulo, tecla in [('arrematacao', 'Arrematação', '1'), ('pessoas', 'Cadastro', '2'), ('itens', 'Itens', '3'), ('pessoas_lista', 'Pessoas cadastradas', '4')] %}
+        {% for ep, rotulo, tecla in [('arrematacao', 'Arrematação', '1'), ('pessoas', 'Cadastro', '2'), ('itens', 'Itens', '3'), ('pessoas_lista', 'Pessoas cadastradas', '4'), ('caixa', 'Caixa', '5')] %}
         <a href="{{ url_for(ep) }}" data-code="Digit{{ tecla }}"
            class="px-3 py-2 rounded-md font-semibold {{ 'bg-white text-pinheiro' if request.endpoint == ep else 'hover:bg-pinheiro-escuro' }}"
            {% if request.endpoint == ep %}aria-current="page"{% endif %}>{{ rotulo }} <kbd>Alt+{{ tecla }}</kbd></a>

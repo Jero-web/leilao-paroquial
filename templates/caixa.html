@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Caixa - {{ nome_leilao }}{% endblock %}
+{% block content %}
+<section class="space-y-5">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h1 class="text-2xl font-extrabold">Caixa e liquidação de promissórias</h1>
+  </div>
+  <p id="avisoCaixa" role="status" aria-live="polite" class="min-h-[1.5rem] font-semibold"></p>
+  <div class="bg-white rounded-xl border border-tinta/10 p-4">
+    <label class="rotulo" for="buscaPessoa">Arrematante (número de cadastro ou nome)</label>
+    <div class="relative"><input id="buscaPessoa" class="campo campo-grande" autocomplete="off" autofocus></div>
+    <p id="buscaInfo" class="mt-1 text-sm text-tinta/70" aria-live="polite">Digite o número de cadastro ou parte do nome.</p>
+  </div>
+
+  <div id="painelCaixa" class="hidden space-y-5">
+    <section id="clienteCard" class="bg-white rounded-xl border-2 border-pinheiro p-4"></section>
+    <section class="bg-white rounded-xl border border-tinta/10 overflow-x-auto">
+      <h2 class="px-4 pt-4 text-lg font-bold">Itens arrematados</h2>
+      <table class="w-full text-left mt-2">
+        <thead class="bg-pinheiro-claro text-sm">
+          <tr><th class="px-4 py-2">Nº Ordem</th><th class="px-4 py-2">Descrição</th><th class="px-4 py-2 text-right">Valor do arremate</th></tr>
+        </thead>
+        <tbody id="itensCaixa"></tbody>
+      </table>
+    </section>
+
+    <div class="rounded-xl bg-pinheiro text-white p-5">
+      <p class="text-sm uppercase tracking-wide font-bold">Valor total a pagar</p>
+      <p id="totalDevedor" class="text-3xl sm:text-4xl font-extrabold tabular-nums"></p>
+      <p id="resumoPago" class="mt-2 text-sm"></p>
+    </div>
+
+    <form id="formPagamento" class="bg-white rounded-xl border border-tinta/10 p-4 sm:p-6 space-y-4" novalidate>
+      <h2 class="text-xl font-extrabold">Registrar recebimento</h2>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="rotulo" for="valorPix">Valor pago em PIX (R$)</label>
+          <input id="valorPix" class="campo campo-grande" inputmode="decimal" autocomplete="off" value="0,00">
+        </div>
+        <div>
+          <label class="rotulo" for="valorEspecie">Valor pago em espécie/dinheiro (R$)</label>
+          <input id="valorEspecie" class="campo campo-grande" inputmode="decimal" autocomplete="off" value="0,00">
+        </div>
+      </div>
+      <div class="grid gap-2 sm:grid-cols-3 rounded-lg bg-papel p-4">
+        <p>Total informado: <strong id="totalInformado"></strong></p>
+        <p>Troco: <strong id="troco"></strong></p>
+        <p>Restante a pagar: <strong id="restante"></strong></p>
+      </div>
+      <div id="observacaoWrap" class="hidden">
+        <label class="rotulo" for="observacao">Observação de pagamento / acordo de saldo <span class="text-tijolo">(obrigatória)</span></label>
+        <textarea id="observacao" class="campo min-h-24" maxlength="1000" placeholder="Como e quando o saldo restante será pago?"></textarea>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <button id="confirmarPagamento" type="submit" class="botao">Confirmar e registrar pagamento</button>
+        <a id="imprimirPromissoria" class="botao botao-sec" target="_blank" rel="noopener">Imprimir promissória / recibo</a>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+{% block atalhos %}
+<li><kbd>Tab</kbd> alterna entre PIX e espécie</li>
+<li><kbd>Enter</kbd> no campo final registra o pagamento</li>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/caixa.js') }}"></script>{% endblock %}

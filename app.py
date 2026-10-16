@@ -123,6 +123,11 @@ def arrematacao():
     return render_template("arrematacao.html")
 
 
+@app.get("/caixa")
+def caixa():
+    return render_template("caixa.html")
+
+
 # --------------------------------------------------------------------------- API: pessoas
 def validar_pessoa(d):
     """Valida os campos de uma pessoa. Devolve (dados, None) ou (None, resposta_de_erro)."""
@@ -177,6 +182,17 @@ def api_excluir_pessoa(pid):
     pessoa = db.execute("SELECT id, nome FROM pessoas WHERE id = ?", (pid,)).fetchone()
     if pessoa is None:
         return erro(f"Cadastro nº {pid} não encontrado.", 404)
+    pagamentos = db.execute(
+        "SELECT COUNT(*) AS n FROM pagamentos WHERE arrematante_id = ?", (pid,)
+    ).fetchone()["n"]
+    if pagamentos:
+        return erro(
+            f"{pessoa['nome']} tem {pagamentos} pagamento(s) registrado(s); "
+            "o cadastro não pode ser excluído para preservar o histórico.",
+            409,
+            codigo="tem_pagamentos",
+            pagamentos=pagamentos,
+        )
     lances = db.execute("SELECT COUNT(*) AS n FROM arremates WHERE arrematante_id = ?", (pid,)).fetchone()["n"]
     if lances and not forcar:
         vendas = [dict(r) for r in db.execute(
@@ -247,6 +263,123 @@ def api_listar_pessoas():
         params,
     ).fetchall()
     return jsonify({"total": total, "pessoas": [dict(r) for r in rows]})
+
+
+# --------------------------------------------------------------------------- caixa e pagamentos
+def dados_caixa(db, pessoa_id):
+    pessoa = db.execute(
+        "SELECT id, nome, cpf, telefone FROM pessoas WHERE id = ?", (pessoa_id,)
+    ).fetchone()
+    if pessoa is None:
+        return None
+    arremates = db.execute(
+        """SELECT i.id, i.produto, a.valor_arremate, a.doado
+             FROM arremates_vencedores a JOIN itens i ON i.id = a.item_id
+            WHERE a.arrematante_id = ? ORDER BY i.id, a.id""",
+        (pessoa_id,),
+    ).fetchall()
+    pagamentos = db.execute(
+        """SELECT id, valor_total_devedor, valor_pix, valor_especie, valor_pago_total,
+                  saldo_restante, observacao_pendencia, status, data_pagamento
+             FROM pagamentos WHERE arrematante_id = ?
+            ORDER BY data_pagamento DESC, id DESC""",
+        (pessoa_id,),
+    ).fetchall()
+    total_devedor = round(sum(a["valor_arremate"] for a in arremates), 2)
+    pago_pix = round(sum(p["valor_pix"] for p in pagamentos), 2)
+    pago_especie = round(sum(p["valor_especie"] for p in pagamentos), 2)
+    pago_total = round(pago_pix + pago_especie, 2)
+    saldo = round(max(0, total_devedor - pago_total), 2)
+    observacao = next((p["observacao_pendencia"] for p in pagamentos
+                       if p["observacao_pendencia"]), None)
+    return {
+        "pessoa": dict(pessoa),
+        "arremates": [dict(a) for a in arremates],
+        "pagamentos": [dict(p) for p in pagamentos],
+        "valor_total_devedor": total_devedor,
+        "valor_pix": pago_pix,
+        "valor_especie": pago_especie,
+        "valor_pago_total": pago_total,
+        "saldo_restante": saldo,
+        "status": "LIQUIDADO" if saldo == 0 else "PENDENTE",
+        "observacao_pendencia": observacao,
+    }
+
+
+@app.get("/api/caixa/pessoas")
+def api_buscar_pessoas_caixa():
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify([])
+    db = get_db()
+    if q.isascii() and q.isdigit():
+        rows = db.execute(
+            """SELECT id, nome, cpf FROM pessoas
+                WHERE id = ? OR norm(nome) LIKE ? ESCAPE '\\'
+                ORDER BY (id = ?) DESC, nome COLLATE NOCASE LIMIT 8""",
+            (int(q), f"%{normalizar(q)}%", int(q)),
+        ).fetchall()
+    else:
+        nq = normalizar(q).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = db.execute(
+            """SELECT id, nome, cpf FROM pessoas
+                WHERE norm(nome) LIKE ? ESCAPE '\\'
+                ORDER BY (norm(nome) LIKE ? ESCAPE '\\') DESC, nome COLLATE NOCASE
+                LIMIT 8""",
+            (f"%{nq}%", f"{nq}%"),
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.get("/api/caixa/pessoas/<int:pessoa_id>")
+def api_dados_caixa(pessoa_id):
+    dados = dados_caixa(get_db(), pessoa_id)
+    if dados is None:
+        return erro(f"Cadastro nº {pessoa_id} não encontrado.", 404)
+    return jsonify(dados)
+
+
+@app.post("/api/pagamentos")
+def api_registrar_pagamento():
+    dados = request.get_json(silent=True) or {}
+    pessoa_id = to_int(dados.get("arrematante_id"))
+    if not pessoa_id:
+        return erro("Selecione um arrematante.", 422, campo="arrematante_id")
+    pix = parse_valor(dados.get("valor_pix", 0))
+    especie = parse_valor(dados.get("valor_especie", 0))
+    if pix is None or especie is None or pix < 0 or especie < 0:
+        return erro("Informe valores válidos e não negativos para PIX e espécie.", 422)
+    observacao = txt(dados, "observacao_pendencia")
+    db = get_db()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        atual = dados_caixa(db, pessoa_id)
+        if atual is None:
+            db.rollback()
+            return erro(f"Cadastro nº {pessoa_id} não encontrado.", 404)
+        valor_pago = round(pix + especie, 2)
+        saldo = round(max(0, atual["valor_total_devedor"] - atual["valor_pago_total"] - valor_pago), 2)
+        status = "LIQUIDADO" if saldo == 0 else "PENDENTE"
+        if status == "PENDENTE" and not observacao:
+            db.rollback()
+            return erro("Descreva como e quando o saldo restante será pago.", 422,
+                        campo="observacao_pendencia")
+        if atual["valor_total_devedor"] == 0 and valor_pago == 0:
+            db.rollback()
+            return erro("Este arrematante não possui valores a receber.", 409)
+        db.execute(
+            """INSERT INTO pagamentos
+               (arrematante_id, valor_total_devedor, valor_pix, valor_especie,
+                valor_pago_total, saldo_restante, observacao_pendencia, status, data_pagamento)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pessoa_id, atual["valor_total_devedor"], pix, especie, valor_pago,
+             saldo, observacao, status, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        raise
+    return jsonify(dados_caixa(db, pessoa_id)), 201
 
 
 # --------------------------------------------------------------------------- API: tipos de item
@@ -674,8 +807,8 @@ class LinhaPontilhada(Flowable):
         c.restoreState()
 
 
-def gerar_promissoria_pdf(pessoa, arremates):
-    total = round(sum(a["valor_arremate"] for a in arremates), 2)
+def gerar_promissoria_pdf(pessoa, arremates, financeiro):
+    total = financeiro["valor_total_devedor"]
     agora = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     base = getSampleStyleSheet()["Normal"]
@@ -713,14 +846,17 @@ def gerar_promissoria_pdf(pessoa, arremates):
     est_cab = ParagraphStyle("cab", parent=normal, fontName="Helvetica-Bold", textColor=colors.white)
     cab = [
         p("Nº de ordem", ParagraphStyle("cab0", parent=est_cab, alignment=TA_CENTER)),
-        p("Produto", est_cab),
+        p("Descrição", est_cab),
         p("Valor do arremate", ParagraphStyle("cab2", parent=est_cab, alignment=TA_RIGHT)),
     ]
 
     celula_valor = ParagraphStyle("cv", parent=normal, alignment=TA_RIGHT)
     celula_num = ParagraphStyle("cn", parent=normal, alignment=TA_CENTER)
     if arremates:
-        linhas = [[p(str(a["id"]), celula_num), p(xml_escape(a["produto"]) + (" <b>(D)</b>" if a["doado"] else ""), normal),
+        linhas = [[p(str(a["id"]), celula_num),
+                   p(xml_escape(a["produto"]) +
+                     (f"<br/><font size='8'>{xml_escape(a['descricao'])}</font>" if a["descricao"] else "") +
+                     (" <b>(D)</b>" if a["doado"] else ""), normal),
                    p(brl(a["valor_arremate"]), celula_valor)]
                   for a in arremates]
         alturas = None
@@ -740,13 +876,27 @@ def gerar_promissoria_pdf(pessoa, arremates):
     tabela = Table([cab] + linhas, colWidths=[26 * mm, 102 * mm, 42 * mm], repeatRows=1, rowHeights=alturas)
     tabela.setStyle(TableStyle(estilo_itens))
 
-    total_tab = Table([["Valor total geral", brl(total)]], colWidths=[128 * mm, 42 * mm])
+    total_tab = Table(
+        [
+            ["Valor Total dos Arremates", brl(total)],
+            ["Valor Pago via PIX", brl(financeiro["valor_pix"])],
+            ["Valor Pago em Espécie", brl(financeiro["valor_especie"])],
+            ["Total Pago", brl(financeiro["valor_pago_total"])],
+            ["Saldo Devedor / Restante", brl(financeiro["saldo_restante"])],
+            ["Observações / Forma de Quitação do Saldo",
+             p(xml_escape(financeiro["observacao_pendencia"]) if financeiro["observacao_pendencia"] else "—")],
+        ],
+        colWidths=[128 * mm, 42 * mm],
+    )
     total_tab.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 11),
-        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 0), (0, -1), "LEFT"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("BACKGROUND", (0, 0), (-1, -1), VERDE_CLARO),
         ("BOX", (0, 0), (-1, -1), 1, VERDE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, LINHA),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
@@ -757,10 +907,10 @@ def gerar_promissoria_pdf(pessoa, arremates):
         Spacer(1, 6 * mm),
         p("Valor total por extenso:"),
         LinhaPontilhada(170 * mm, 9 * mm, 2 * mm),
-        Spacer(1, 4 * mm),
-        p(f"Emitida em {agora}"),
+        Spacer(1, 5 * mm),
+        p(f"Local: ________________________________    Data e hora do fechamento: {agora}"),
         Spacer(1, 14 * mm),
-        LinhaPontilhada(110 * mm, 18 * mm, 12 * mm, ("Assinatura do cliente", pessoa["nome"])),
+        LinhaPontilhada(110 * mm, 18 * mm, 12 * mm, ("Assinatura do arrematante", pessoa["nome"])),
     ])
 
     historia = [
@@ -800,12 +950,13 @@ def promissoria(pessoa_id):
     if pessoa is None:
         return f"Cadastro nº {pessoa_id} não encontrado.", 404
     arremates = db.execute(
-        """SELECT i.id, i.produto, a.valor_arremate, a.doado
+        """SELECT i.id, i.produto, i.descricao, a.valor_arremate, a.doado
              FROM arremates_vencedores a JOIN itens i ON i.id = a.item_id
             WHERE a.arrematante_id = ? ORDER BY i.id, a.id""",
         (pessoa_id,),
     ).fetchall()
-    pdf = gerar_promissoria_pdf(pessoa, arremates)
+    financeiro = dados_caixa(db, pessoa_id)
+    pdf = gerar_promissoria_pdf(pessoa, arremates, financeiro)
     resp = send_file(io.BytesIO(pdf), mimetype="application/pdf", download_name=f"promissoria_{pessoa_id}.pdf")
     resp.headers["Cache-Control"] = "no-store"  # a promissória muda a cada lance
     return resp
