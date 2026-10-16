@@ -124,23 +124,77 @@ def arrematacao():
 
 
 # --------------------------------------------------------------------------- API: pessoas
-@app.post("/api/pessoas")
-def api_criar_pessoa():
-    d = request.get_json(silent=True) or {}
+def validar_pessoa(d):
+    """Valida os campos de uma pessoa. Devolve (dados, None) ou (None, resposta_de_erro)."""
     nome = txt(d, "nome")
     if not nome:
-        return erro("Informe o nome.", 422, campo="nome")
+        return None, erro("Informe o nome.", 422, campo="nome")
     funcao = (txt(d, "funcao") or "CLIENTE").upper()
     if funcao not in ("CLIENTE", "COMISSAO"):
-        return erro("Função inválida.", 422, campo="funcao")
+        return None, erro("Função inválida.", 422, campo="funcao")
+    return {"nome": nome, "cpf": txt(d, "cpf"), "telefone": txt(d, "telefone"),
+            "endereco": txt(d, "endereco"), "funcao": funcao}, None
+
+
+@app.post("/api/pessoas")
+def api_criar_pessoa():
+    dados, resposta = validar_pessoa(request.get_json(silent=True) or {})
+    if resposta:
+        return resposta
     db = get_db()
     cur = db.execute(
         "INSERT INTO pessoas (nome, cpf, telefone, endereco, funcao) VALUES (?, ?, ?, ?, ?)",
-        (nome, txt(d, "cpf"), txt(d, "telefone"), txt(d, "endereco"), funcao),
+        (dados["nome"], dados["cpf"], dados["telefone"], dados["endereco"], dados["funcao"]),
     )
     db.commit()
     row = db.execute("SELECT * FROM pessoas WHERE id = ?", (cur.lastrowid,)).fetchone()
     return jsonify(dict(row)), 201
+
+
+@app.put("/api/pessoas/<int:pid>")
+def api_editar_pessoa(pid):
+    """Altera os dados da pessoa. O número de cadastro não muda (promissórias e lances dependem dele)."""
+    db = get_db()
+    if db.execute("SELECT 1 FROM pessoas WHERE id = ?", (pid,)).fetchone() is None:
+        return erro(f"Cadastro nº {pid} não encontrado.", 404)
+    dados, resposta = validar_pessoa(request.get_json(silent=True) or {})
+    if resposta:
+        return resposta
+    db.execute(
+        "UPDATE pessoas SET nome = ?, cpf = ?, telefone = ?, endereco = ?, funcao = ? WHERE id = ?",
+        (dados["nome"], dados["cpf"], dados["telefone"], dados["endereco"], dados["funcao"], pid),
+    )
+    db.commit()
+    return jsonify(dict(db.execute("SELECT * FROM pessoas WHERE id = ?", (pid,)).fetchone()))
+
+
+@app.delete("/api/pessoas/<int:pid>")
+def api_excluir_pessoa(pid):
+    """Exclui o cadastro. Quem tem lances só é excluído com forcar=1, o que apaga também os lances dele.
+    Itens doados por essa pessoa continuam cadastrados, só ficam sem doador."""
+    forcar = request.args.get("forcar") == "1"
+    db = get_db()
+    pessoa = db.execute("SELECT id, nome FROM pessoas WHERE id = ?", (pid,)).fetchone()
+    if pessoa is None:
+        return erro(f"Cadastro nº {pid} não encontrado.", 404)
+    lances = db.execute("SELECT COUNT(*) AS n FROM arremates WHERE arrematante_id = ?", (pid,)).fetchone()["n"]
+    if lances and not forcar:
+        vendas = [dict(r) for r in db.execute(
+            """SELECT i.id AS item_id, i.produto, a.valor_arremate AS valor, a.doado
+                 FROM arremates_vencedores a JOIN itens i ON i.id = a.item_id
+                WHERE a.arrematante_id = ? ORDER BY i.id, a.id""", (pid,))]
+        return erro(f"{pessoa['nome']} tem {lances} lance(s) registrado(s).", 409, codigo="tem_lances",
+                    lances=lances, vendas=vendas, total=round(sum(v["valor"] for v in vendas), 2))
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("DELETE FROM arremates WHERE arrematante_id = ?", (pid,))
+        sem_doador = db.execute("UPDATE itens SET doador_id = NULL WHERE doador_id = ?", (pid,)).rowcount
+        db.execute("DELETE FROM pessoas WHERE id = ?", (pid,))
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        raise
+    return jsonify({"ok": True, "lances_apagados": lances, "itens_sem_doador": sem_doador})
 
 
 @app.get("/api/pessoas/busca")
@@ -182,7 +236,7 @@ def api_listar_pessoas():
     db = get_db()
     total = db.execute(f"SELECT COUNT(*) AS n FROM pessoas p {where}", params).fetchone()["n"]
     rows = db.execute(
-        f"""SELECT p.id, p.nome, p.cpf, p.telefone, p.funcao,
+        f"""SELECT p.id, p.nome, p.cpf, p.telefone, p.endereco, p.funcao,
                    COUNT(v.id) AS qtd_itens, COALESCE(SUM(v.valor_arremate), 0) AS total
               FROM pessoas p
               LEFT JOIN arremates_vencedores v ON v.arrematante_id = p.id
@@ -195,19 +249,56 @@ def api_listar_pessoas():
     return jsonify({"total": total, "pessoas": [dict(r) for r in rows]})
 
 
+# --------------------------------------------------------------------------- API: tipos de item
+@app.get("/api/tipos")
+def api_listar_tipos():
+    rows = get_db().execute("SELECT id, nome FROM tipos_item ORDER BY nome COLLATE NOCASE").fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post("/api/tipos")
+def api_criar_tipo():
+    d = request.get_json(silent=True) or {}
+    nome = re.sub(r"\s+", " ", txt(d, "nome") or "")
+    if not nome:
+        return erro("Digite o nome do tipo.", 422, campo="nome")
+    if len(nome) > 60:
+        return erro("O nome do tipo pode ter no máximo 60 caracteres.", 422, campo="nome")
+    db = get_db()
+
+    def existente():  # "bolo", "Bolo" e "BÓLO" são o mesmo tipo
+        return db.execute("SELECT id, nome FROM tipos_item WHERE norm(nome) = ?", (normalizar(nome),)).fetchone()
+
+    row = existente()
+    if row is None:
+        try:
+            cur = db.execute("INSERT INTO tipos_item (nome) VALUES (?)", (nome,))
+            db.commit()
+            return jsonify({"id": cur.lastrowid, "nome": nome}), 201
+        except sqlite3.IntegrityError:  # outro operador cadastrou o mesmo nome agora há pouco
+            db.rollback()
+            row = existente()
+    return erro(f'O tipo "{row["nome"]}" já existe.', 409, tipo=dict(row))
+
+
 # --------------------------------------------------------------------------- API: itens
 ITEM_SQL = """
     SELECT i.id, i.produto, i.descricao, i.valor_minimo, i.doador_id, d.nome AS doador_nome,
-           a.id AS arremate_id, a.valor_arremate, a.arrematante_id, p.nome AS arrematante_nome
+           i.tipo_id, t.nome AS tipo_nome,
+           a.id AS arremate_id, a.valor_arremate, a.arrematante_id, p.nome AS arrematante_nome,
+           (SELECT COUNT(*) FROM arremates x WHERE x.item_id = i.id AND x.doado = 1) AS doacoes
       FROM itens i
       LEFT JOIN pessoas d ON d.id = i.doador_id
-      LEFT JOIN arremates_vencedores a ON a.item_id = i.id
+      LEFT JOIN tipos_item t ON t.id = i.tipo_id
+      LEFT JOIN lider_atual a ON a.item_id = i.id
       LEFT JOIN pessoas p ON p.id = a.arrematante_id
      WHERE i.id = ?"""
 
 
 def item_json(row):
-    out = {k: row[k] for k in ("id", "produto", "descricao", "valor_minimo", "doador_id", "doador_nome")}
+    out = {k: row[k] for k in ("id", "produto", "descricao", "valor_minimo", "doador_id", "doador_nome",
+                                "tipo_id", "tipo_nome")}
+    out["doacoes"] = row["doacoes"]
     out["arrematado"] = None
     if row["arremate_id"] is not None:
         out["arrematado"] = {
@@ -227,60 +318,189 @@ def api_item(iid):
     return jsonify(item_json(row))
 
 
-@app.post("/api/itens")
-def api_criar_item():
-    d = request.get_json(silent=True) or {}
-    db = get_db()
+def padrao_like(q):
+    """Texto sem acento e com curingas escapados, para LIKE ... ESCAPE '\\'."""
+    return normalizar(q).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
+
+DOADO_SQL = "EXISTS (SELECT 1 FROM arremates x WHERE x.item_id = i.id AND x.doado = 1)"
+
+
+@app.get("/api/itens/proximo")
+def api_proximo_item():
+    return jsonify({"proximo": get_db().execute("SELECT COALESCE(MAX(id), 0) + 1 AS p FROM itens").fetchone()["p"]})
+
+
+@app.get("/api/itens")
+def api_listar_itens():
+    """Itens com filtros: q (número, produto, tipo, descrição, doador), situacao e doacao."""
+    q = request.args.get("q", "").strip()
+    situacao = request.args.get("situacao", "")
+    doacao = request.args.get("doacao", "")
+    where, params = [], []
+    if q:
+        like = f"%{padrao_like(q)}%"
+        cond = ("(norm(i.produto) LIKE ? ESCAPE '\\' OR norm(i.descricao) LIKE ? ESCAPE '\\' "
+                "OR norm(d.nome) LIKE ? ESCAPE '\\' OR norm(t.nome) LIKE ? ESCAPE '\\'")
+        params += [like, like, like, like]
+        if q.isascii() and q.isdigit():
+            cond += " OR i.id = ?"
+            params.append(int(q))
+        where.append(cond + ")")
+    if situacao == "disponivel":
+        where.append("l.item_id IS NULL")          # sem lance atual (nunca teve ou foi doado de volta)
+    elif situacao == "arrematado":
+        where.append("l.item_id IS NOT NULL")
+    if doacao == "com":
+        where.append(DOADO_SQL)
+    elif doacao == "sem":
+        where.append("NOT " + DOADO_SQL)
+    de = """FROM itens i
+              LEFT JOIN pessoas d ON d.id = i.doador_id
+              LEFT JOIN tipos_item t ON t.id = i.tipo_id
+              LEFT JOIN lider_atual l ON l.item_id = i.id
+              LEFT JOIN pessoas p ON p.id = l.arrematante_id"""
+    filtro = ("WHERE " + " AND ".join(where)) if where else ""
+    db = get_db()
+    total = db.execute(f"SELECT COUNT(*) AS n {de} {filtro}", params).fetchone()["n"]
+    rows = db.execute(
+        f"""SELECT i.id, i.produto, i.descricao, i.valor_minimo, i.doador_id, d.nome AS doador_nome,
+                   i.tipo_id, t.nome AS tipo_nome,
+                   l.valor_arremate AS lance_valor, l.arrematante_id, p.nome AS arrematante_nome,
+                   (SELECT COUNT(*) FROM arremates x WHERE x.item_id = i.id AND x.doado = 1) AS doacoes
+              {de} {filtro}
+             ORDER BY i.id LIMIT 300""",
+        params,
+    ).fetchall()
+    return jsonify({"total": total, "itens": [dict(r) for r in rows]})
+
+
+def validar_item(d, db):
+    """Valida os campos de um item. Devolve (dados, None) ou (None, resposta_de_erro)."""
     produto = txt(d, "produto")
     if not produto:
-        return erro("Informe o produto.", 422, campo="produto")
+        return None, erro("Informe o produto.", 422, campo="produto")
 
     ordem = None
     if txt(d, "id"):
         ordem = to_int(d.get("id"))
         if not ordem:
-            return erro("O número de ordem deve ser um inteiro positivo.", 422, campo="id")
+            return None, erro("O número de ordem deve ser um inteiro positivo.", 422, campo="id")
 
     valor_min = 0.0
     if txt(d, "valor_minimo"):
         valor_min = parse_valor(d.get("valor_minimo"))
         if valor_min is None or valor_min < 0:
-            return erro("Valor mínimo inválido.", 422, campo="valor_minimo")
+            return None, erro("Valor mínimo inválido.", 422, campo="valor_minimo")
 
     doador_id = None
     if txt(d, "doador_id"):
         doador_id = to_int(d.get("doador_id"))
         if not doador_id or db.execute("SELECT 1 FROM pessoas WHERE id = ?", (doador_id,)).fetchone() is None:
-            return erro("Doador não encontrado.", 422, campo="doador")
+            return None, erro("Doador não encontrado.", 422, campo="doador")
 
+    tipo_id = None
+    if txt(d, "tipo_id"):
+        tipo_id = to_int(d.get("tipo_id"))
+        if not tipo_id or db.execute("SELECT 1 FROM tipos_item WHERE id = ?", (tipo_id,)).fetchone() is None:
+            return None, erro("Tipo não encontrado. Atualize a lista de tipos.", 422, campo="tipo")
+
+    return {"ordem": ordem, "produto": produto, "valor_min": valor_min,
+            "descricao": txt(d, "descricao"), "doador_id": doador_id, "tipo_id": tipo_id}, None
+
+
+@app.post("/api/itens")
+def api_criar_item():
+    db = get_db()
+    v, resposta = validar_item(request.get_json(silent=True) or {}, db)
+    if resposta:
+        return resposta
     try:
-        if ordem is None:
+        if v["ordem"] is None:
             cur = db.execute(
-                "INSERT INTO itens (produto, valor_minimo, descricao, doador_id) VALUES (?, ?, ?, ?)",
-                (produto, valor_min, txt(d, "descricao"), doador_id),
+                "INSERT INTO itens (produto, valor_minimo, descricao, doador_id, tipo_id) VALUES (?, ?, ?, ?, ?)",
+                (v["produto"], v["valor_min"], v["descricao"], v["doador_id"], v["tipo_id"]),
             )
         else:
             cur = db.execute(
-                "INSERT INTO itens (id, produto, valor_minimo, descricao, doador_id) VALUES (?, ?, ?, ?, ?)",
-                (ordem, produto, valor_min, txt(d, "descricao"), doador_id),
+                "INSERT INTO itens (id, produto, valor_minimo, descricao, doador_id, tipo_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (v["ordem"], v["produto"], v["valor_min"], v["descricao"], v["doador_id"], v["tipo_id"]),
             )
         db.commit()
     except sqlite3.IntegrityError:
         db.rollback()
-        return erro(f"Já existe um item com o número {ordem}.", 409, campo="id")
+        return erro(f"Já existe um item com o número {v['ordem']}.", 409, campo="id")
 
     novo = item_json(db.execute(ITEM_SQL, (cur.lastrowid,)).fetchone())
     novo["proximo"] = db.execute("SELECT COALESCE(MAX(id), 0) + 1 AS p FROM itens").fetchone()["p"]
     return jsonify(novo), 201
 
 
+@app.put("/api/itens/<int:iid>")
+def api_editar_item(iid):
+    """Altera o item. O número de ordem só pode mudar se o item ainda não tem lances."""
+    db = get_db()
+    if db.execute("SELECT 1 FROM itens WHERE id = ?", (iid,)).fetchone() is None:
+        return erro(f"Item nº {iid} não encontrado.", 404)
+    v, resposta = validar_item(request.get_json(silent=True) or {}, db)
+    if resposta:
+        return resposta
+    novo_id = v["ordem"] or iid
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if novo_id != iid:
+            if db.execute("SELECT 1 FROM arremates WHERE item_id = ?", (iid,)).fetchone():
+                db.rollback()
+                return erro("Este item já tem lances registrados, então o número de ordem não pode mudar.", 409, campo="id")
+            if db.execute("SELECT 1 FROM itens WHERE id = ?", (novo_id,)).fetchone():
+                db.rollback()
+                return erro(f"Já existe um item com o número {novo_id}.", 409, campo="id")
+        db.execute(
+            "UPDATE itens SET id = ?, produto = ?, valor_minimo = ?, descricao = ?, doador_id = ?, tipo_id = ? WHERE id = ?",
+            (novo_id, v["produto"], v["valor_min"], v["descricao"], v["doador_id"], v["tipo_id"], iid),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        db.rollback()
+        return erro("Não foi possível salvar as alterações do item.", 409)
+    out = item_json(db.execute(ITEM_SQL, (novo_id,)).fetchone())
+    out["proximo"] = db.execute("SELECT COALESCE(MAX(id), 0) + 1 AS p FROM itens").fetchone()["p"]
+    return jsonify(out)
+
+
+@app.delete("/api/itens/<int:iid>")
+def api_excluir_item(iid):
+    """Exclui o item. Se ele tem lances, só com forcar=1, o que apaga também os lances (e muda promissórias)."""
+    forcar = request.args.get("forcar") == "1"
+    db = get_db()
+    item = db.execute("SELECT id, produto FROM itens WHERE id = ?", (iid,)).fetchone()
+    if item is None:
+        return erro(f"Item nº {iid} não encontrado.", 404)
+    lances = db.execute("SELECT COUNT(*) AS n FROM arremates WHERE item_id = ?", (iid,)).fetchone()["n"]
+    if lances and not forcar:
+        vendas = [dict(r) for r in db.execute(
+            """SELECT p.id AS pessoa_id, p.nome, a.valor_arremate AS valor, a.doado
+                 FROM arremates_vencedores a JOIN pessoas p ON p.id = a.arrematante_id
+                WHERE a.item_id = ? ORDER BY a.id""", (iid,))]
+        return erro(f"O item {iid} ({item['produto']}) tem {lances} lance(s) registrado(s).", 409, codigo="tem_lances",
+                    lances=lances, vendas=vendas, total=round(sum(v["valor"] for v in vendas), 2))
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("DELETE FROM arremates WHERE item_id = ?", (iid,))
+        db.execute("DELETE FROM itens WHERE id = ?", (iid,))
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        raise
+    return jsonify({"ok": True, "lances_apagados": lances})
+
+
 # --------------------------------------------------------------------------- API: arremates
 ULTIMOS_SQL = """
-    SELECT a.id, a.item_id, i.produto, a.arrematante_id, p.nome AS arrematante_nome,
-           a.valor_arremate AS valor, a.data_hora,
-           (a.id = (SELECT b.id FROM arremates b WHERE b.item_id = a.item_id
-                     ORDER BY b.valor_arremate DESC LIMIT 1)) AS lider
+    SELECT a.id, a.item_id, i.produto, i.valor_minimo, a.arrematante_id, p.nome AS arrematante_nome,
+           a.valor_arremate AS valor, a.data_hora, a.doado,
+           (a.doado = 0 AND a.id = (SELECT MAX(b.id) FROM arremates b WHERE b.item_id = a.item_id)) AS lider,
+           (a.doado = 1 AND a.id = (SELECT MAX(b.id) FROM arremates b WHERE b.item_id = a.item_id)) AS desfazivel
       FROM arremates a
       JOIN itens i ON i.id = a.item_id
       JOIN pessoas p ON p.id = a.arrematante_id
@@ -295,11 +515,11 @@ def api_ultimos_arremates():
 
 
 def lider_do_item(db, item_id):
-    """Maior lance atual do item (ou None)."""
+    """Maior lance atual do item (None se não há lance ou se o item foi doado de volta)."""
     row = db.execute(
-        """SELECT a.id, a.valor_arremate AS valor, a.arrematante_id, p.nome AS arrematante_nome
-             FROM arremates a JOIN pessoas p ON p.id = a.arrematante_id
-            WHERE a.item_id = ? ORDER BY a.valor_arremate DESC LIMIT 1""",
+        """SELECT l.id, l.valor_arremate AS valor, l.arrematante_id, p.nome AS arrematante_nome
+             FROM lider_atual l JOIN pessoas p ON p.id = l.arrematante_id
+            WHERE l.item_id = ?""",
         (item_id,),
     ).fetchone()
     return dict(row) if row else None
@@ -307,7 +527,8 @@ def lider_do_item(db, item_id):
 
 @app.post("/api/arremates")
 def api_criar_arremate():
-    """Registra um lance. Só vale se atingir o mínimo do item E superar o maior lance atual."""
+    """Registra um lance. Só vale se atingir o mínimo do item E superar o maior lance atual.
+    Item doado de volta ao leilão não tem lance atual: basta atingir o mínimo (inclusive o doador)."""
     d = request.get_json(silent=True) or {}
     db = get_db()
 
@@ -345,13 +566,67 @@ def api_criar_arremate():
         db.commit()
     except sqlite3.IntegrityError:
         db.rollback()
-        return erro("Outro lance do mesmo valor acabou de ser registrado. Confira o valor atual e tente de novo.", 409,
+        return erro("Não foi possível registrar o lance. Confira os dados e tente de novo.", 409,
                     codigo="lance_insuficiente")
 
     row = db.execute(ULTIMOS_SQL.format(where="WHERE a.id = ?", limite=""), (cur.lastrowid,)).fetchone()
     out = dict(row)
     out["anterior"] = ({"nome": anterior["arrematante_nome"], "valor": anterior["valor"]} if anterior else None)
     return jsonify(out), 201
+
+
+@app.post("/api/arremates/<int:aid>/doar")
+def api_doar(aid):
+    """O arrematante doa o item: a venda continua valendo, mas o item volta ao leilão (a partir do mínimo)."""
+    db = get_db()
+    if db.execute("SELECT 1 FROM arremates WHERE id = ?", (aid,)).fetchone() is None:
+        return erro("Lance não encontrado.", 404)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            """SELECT l.id, l.item_id, l.valor_arremate AS valor, l.arrematante_id, p.nome AS arrematante_nome,
+                      i.produto, i.valor_minimo
+                 FROM lider_atual l JOIN itens i ON i.id = l.item_id JOIN pessoas p ON p.id = l.arrematante_id
+                WHERE l.id = ?""",
+            (aid,),
+        ).fetchone()
+        if row is None:  # superado, já doado ou não é o último lance do item
+            db.rollback()
+            return erro("Só o maior lance atual de um item pode ser doado (este já foi doado ou foi superado).", 409)
+        db.execute("UPDATE arremates SET doado = 1 WHERE id = ?", (aid,))
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        raise
+    out = dict(row)
+    out["ok"] = True
+    out["doacoes"] = db.execute("SELECT COUNT(*) AS n FROM arremates WHERE item_id = ? AND doado = 1",
+                                (row["item_id"],)).fetchone()["n"]
+    return jsonify(out)
+
+
+@app.delete("/api/arremates/<int:aid>/doacao")
+def api_desfazer_doacao(aid):
+    """Desfaz uma doação registrada por engano. Só vale enquanto ninguém deu lance depois dela."""
+    db = get_db()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT item_id, doado FROM arremates WHERE id = ?", (aid,)).fetchone()
+        if row is None:
+            db.rollback()
+            return erro("Lance não encontrado.", 404)
+        if not row["doado"]:
+            db.rollback()
+            return erro("Este lance não está marcado como doado.", 409)
+        if db.execute("SELECT 1 FROM arremates WHERE item_id = ? AND id > ?", (row["item_id"], aid)).fetchone():
+            db.rollback()
+            return erro("Já existem lances depois da doação deste item. Cancele-os antes de desfazer a doação.", 409)
+        db.execute("UPDATE arremates SET doado = 0 WHERE id = ?", (aid,))
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        raise
+    return jsonify({"ok": True, "item_id": row["item_id"]})
 
 
 @app.delete("/api/arremates/<int:aid>")
@@ -445,7 +720,8 @@ def gerar_promissoria_pdf(pessoa, arremates):
     celula_valor = ParagraphStyle("cv", parent=normal, alignment=TA_RIGHT)
     celula_num = ParagraphStyle("cn", parent=normal, alignment=TA_CENTER)
     if arremates:
-        linhas = [[p(str(a["id"]), celula_num), p(xml_escape(a["produto"])), p(brl(a["valor_arremate"]), celula_valor)]
+        linhas = [[p(str(a["id"]), celula_num), p(xml_escape(a["produto"]) + (" <b>(D)</b>" if a["doado"] else ""), normal),
+                   p(brl(a["valor_arremate"]), celula_valor)]
                   for a in arremates]
         alturas = None
     else:  # sem arremates: linhas em branco para preenchimento manual
@@ -493,7 +769,11 @@ def gerar_promissoria_pdf(pessoa, arremates):
         cliente, Spacer(1, 8 * mm),
         Paragraph("Itens arrematados", h2),
         tabela, Spacer(1, 3 * mm),
-        total_tab, Spacer(1, 10 * mm),
+        total_tab,
+        *([Spacer(1, 2 * mm), p("<b>(D)</b> Item doado: o valor continua devido e o item voltou ao leilão.",
+                                ParagraphStyle("leg", parent=normal, fontSize=8.5, textColor=colors.HexColor("#4B5A52")))]
+          if any(a["doado"] for a in arremates) else []),
+        Spacer(1, 10 * mm),
         fecho,
     ]
 
@@ -520,9 +800,9 @@ def promissoria(pessoa_id):
     if pessoa is None:
         return f"Cadastro nº {pessoa_id} não encontrado.", 404
     arremates = db.execute(
-        """SELECT i.id, i.produto, a.valor_arremate
+        """SELECT i.id, i.produto, a.valor_arremate, a.doado
              FROM arremates_vencedores a JOIN itens i ON i.id = a.item_id
-            WHERE a.arrematante_id = ? ORDER BY i.id""",
+            WHERE a.arrematante_id = ? ORDER BY i.id, a.id""",
         (pessoa_id,),
     ).fetchall()
     pdf = gerar_promissoria_pdf(pessoa, arremates)

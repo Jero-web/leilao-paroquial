@@ -39,19 +39,25 @@
     if (estado === 'ok') {
       itemCard.className = base + 'bg-white border-2 border-pinheiro';
       const l = it.arrematado;
+      const pill = it.doacoes > 0
+        ? ` <span class="ml-2 inline-block rounded-full bg-ouro-claro border border-ouro px-2 py-0.5 font-bold text-tinta">Doado ${it.doacoes}x</span>` : '';
       itemCard.innerHTML =
-        `<p class="text-sm text-tinta/70">Item nº ${it.id}</p>` +
+        `<p class="text-sm text-tinta/70">Item nº ${it.id}${pill}</p>` +
         `<p class="text-2xl font-bold break-words">${esc(it.produto)}</p>` +
         (it.descricao ? `<p class="text-base mt-1">${esc(it.descricao)}</p>` : '') +
         `<div class="flex flex-wrap gap-x-6 gap-y-1 mt-2 text-lg">` +
           `<span>Valor mínimo <strong>${brl(it.valor_minimo)}</strong></span>` +
+          (it.tipo_nome ? `<span>Tipo <strong>${esc(it.tipo_nome)}</strong></span>` : '') +
           (it.doador_nome ? `<span>Doador <strong>${esc(it.doador_nome)}</strong></span>` : '') +
         `</div>` +
         (l
           ? `<div class="mt-3 rounded-lg bg-ouro-claro border-2 border-ouro px-3 py-2">` +
               `<span class="font-semibold">Maior lance atual:</span> <strong class="tabular-nums">${brl(l.valor)}</strong> ` +
-              `de ${esc(l.arrematante_nome)} (nº ${l.arrematante_id}). O novo lance precisa ser maior.</div>`
-          : `<p class="mt-3 text-tinta/70">Sem lances ainda. O primeiro lance precisa atingir o valor mínimo.</p>`);
+              `de ${esc(l.arrematante_nome)} (nº ${l.arrematante_id}). O novo lance precisa ser maior.</div>` +
+            `<button type="button" data-doar class="botao botao-sec botao-pequeno mt-3">O arrematante doou o item <kbd>F7</kbd></button>`
+          : it.doacoes > 0
+            ? `<p class="mt-3 font-semibold text-pinheiro">Item doado de volta ao leilão. Qualquer pessoa pode arrematar a partir do valor mínimo (${brl(it.valor_minimo)}), inclusive quem doou.</p>`
+            : `<p class="mt-3 text-tinta/70">Sem lances ainda. O primeiro lance precisa atingir o valor mínimo.</p>`);
     } else if (estado === 'erro') {
       itemCard.className = base + 'bg-tijolo-claro border-2 border-tijolo';
       itemCard.innerHTML = `<p class="text-lg font-bold text-tijolo">${esc(msg)}</p>`;
@@ -156,17 +162,24 @@
       tbody.innerHTML = '<tr><td colspan="4" class="px-3 py-6 text-center text-tinta/70">Nenhum arremate ainda.</td></tr>';
       return;
     }
-    tbody.innerHTML = ultimos.map(a =>
-      `<tr class="border-t border-tinta/10">` +
+    const BTN = 'font-semibold underline focus:outline-none focus-visible:ring-4 focus-visible:ring-ouro rounded text-left ';
+    tbody.innerHTML = ultimos.map(a => {
+      const acoes = [];
+      if (a.lider) acoes.push(['doar', 'Doar', 'text-pinheiro', `Registrar a doação do item ${a.item_id}`]);
+      if (a.doado && a.desfazivel) acoes.push(['desfazer', 'Desfazer doação', 'text-pinheiro', `Desfazer a doação do item ${a.item_id}`]);
+      acoes.push(['cancelar', 'Cancelar', 'text-tijolo', `Cancelar lance do item ${a.item_id}`]);
+      const situacao = a.doado ? ' <span class="font-bold text-pinheiro">doado (D)</span>'
+                     : a.lider ? '' : ' <span class="font-semibold text-tijolo">lance superado</span>';
+      return `<tr class="border-t border-tinta/10">` +
         `<td class="px-3 py-2 align-top"><span class="font-bold tabular-nums">${a.item_id}</span></td>` +
         `<td class="px-3 py-2"><div class="font-semibold break-words">${esc(a.produto)}</div>` +
-          `<div class="text-sm text-tinta/70">${esc(a.arrematante_nome)} (nº ${a.arrematante_id})` +
-          (a.lider ? '' : ' <span class="font-semibold text-tijolo">lance superado</span>') + `</div></td>` +
+          `<div class="text-sm text-tinta/70">${esc(a.arrematante_nome)} (nº ${a.arrematante_id})${situacao}</div></td>` +
         `<td class="px-3 py-2 text-right font-bold tabular-nums whitespace-nowrap">${brl(a.valor)}</td>` +
-        `<td class="px-3 py-2 text-right"><button type="button" data-id="${a.id}" ` +
-          `class="text-tijolo font-semibold underline focus:outline-none focus-visible:ring-4 focus-visible:ring-ouro rounded" ` +
-          `aria-label="Cancelar lance do item ${a.item_id}">Cancelar</button></td>` +
-      `</tr>`).join('');
+        `<td class="px-3 py-2"><div class="flex flex-col items-start gap-1">` +
+          acoes.map(([acao, rotulo, cor, aria]) =>
+            `<button type="button" data-id="${a.id}" data-acao="${acao}" class="${BTN}${cor}" aria-label="${aria}">${rotulo}</button>`).join('') +
+        `</div></td></tr>`;
+    }).join('');
   }
   async function carregarUltimos() {
     const r = await api('/api/arremates/ultimos');
@@ -175,15 +188,16 @@
   }
   async function cancelar(a) {
     if (!a) { ordemEl.focus(); return; }
-    const aviso1 = a.lider ? ' O lance anterior do item, se houver, volta a valer.' : '';
-    if (!confirm(`Cancelar o lance de ${brl(a.valor)} de ${a.arrematante_nome} no item ${a.item_id} (${a.produto})?${aviso1}`)) { ordemEl.focus(); return; }
+    const extra = a.doado ? ` Esse lance foi doado: cancelar remove o item da promissória de ${a.arrematante_nome}.`
+                : a.lider ? ' O lance anterior do item, se houver, volta a valer.' : '';
+    if (!confirm(`Cancelar o lance de ${brl(a.valor)} de ${a.arrematante_nome} no item ${a.item_id} (${a.produto})?${extra}`)) { ordemEl.focus(); return; }
     const r = await api('/api/arremates/' + a.id, { method: 'DELETE' });
     item = null;
     if (r.ok) {
       const l = r.data.lider;
       aviso('aviso', `Lance cancelado. ` + (l
         ? `Maior lance atual do item ${a.item_id}: ${brl(l.valor)} de ${l.arrematante_nome}.`
-        : `O item ${a.item_id} está sem lances.`));
+        : `O item ${a.item_id} está disponível, sem maior lance.`));
     } else {
       aviso('erro', r.data?.erro || 'Não foi possível cancelar.');
     }
@@ -191,10 +205,51 @@
     if (ordemEl.value.trim()) resolverItem();
     irParaOrdem();
   }
+  // ------------------------------------------------------------------ doação do item
+  // O arrematante doa o item: a venda segue na promissória dele (com D) e o item volta ao leilão pelo mínimo.
+  function alvoDoacao() {
+    if (ordemEl.value.trim()) {                    // há um item na tela: vale o maior lance dele
+      const l = item?.arrematado;
+      return l ? { id: l.id, item_id: item.id, produto: item.produto, arrematante_nome: l.arrematante_nome,
+                   valor: l.valor, valor_minimo: item.valor_minimo } : null;
+    }
+    const u = ultimos[0];                          // tela limpa: o último lance salvo, se ainda for o maior
+    return u && u.lider ? u : null;
+  }
+  async function doar(a) {
+    if (!a) { aviso('aviso', 'Nada para doar. Carregue um item que tenha maior lance (ou salve um arremate) e tente de novo.'); return; }
+    const msg = `${a.arrematante_nome} doou o item ${a.item_id} (${a.produto})?\n\n` +
+      `O valor de ${brl(a.valor)} continua na promissória dele, marcado com D.\n` +
+      `O item volta ao leilão a partir do valor mínimo (${brl(a.valor_minimo)}), para qualquer pessoa.`;
+    if (!confirm(msg)) { irParaOrdem(); return; }
+    const r = await api(`/api/arremates/${a.id}/doar`, { method: 'POST' });
+    item = null;
+    aviso(r.ok ? 'ok' : 'erro', r.ok
+      ? `Doação registrada: o item ${a.item_id} (${a.produto}) voltou ao leilão (doado ${r.data.doacoes}x). ${a.arrematante_nome} segue devendo ${brl(a.valor)}, marcado com D.`
+      : (r.data?.erro || 'Não foi possível registrar a doação.'));
+    await carregarUltimos();
+    if (ordemEl.value.trim()) await resolverItem();
+    irParaOrdem();
+  }
+  async function desfazerDoacao(a) {
+    if (!confirm(`Desfazer a doação do item ${a.item_id} (${a.produto})?\nO lance de ${brl(a.valor)} de ${a.arrematante_nome} volta a ser o maior lance atual.`)) { irParaOrdem(); return; }
+    const r = await api(`/api/arremates/${a.id}/doacao`, { method: 'DELETE' });
+    item = null;
+    aviso(r.ok ? 'aviso' : 'erro', r.ok ? `Doação do item ${a.item_id} desfeita.` : (r.data?.erro || 'Não foi possível desfazer a doação.'));
+    await carregarUltimos();
+    if (ordemEl.value.trim()) await resolverItem();
+    irParaOrdem();
+  }
+
   tbody.addEventListener('click', e => {
     const b = e.target.closest('button[data-id]');
-    if (b) cancelar(ultimos.find(a => String(a.id) === b.dataset.id));
+    const a = b && ultimos.find(x => String(x.id) === b.dataset.id);
+    if (!a) return;
+    if (b.dataset.acao === 'doar') doar(a);
+    else if (b.dataset.acao === 'desfazer') desfazerDoacao(a);
+    else cancelar(a);
   });
+  itemCard.addEventListener('click', e => { if (e.target.closest('[data-doar]')) doar(alvoDoacao()); });
 
   // ------------------------------------------------------------------ campos e Enter
   ordemEl.addEventListener('input', () => { item = null; });
@@ -294,6 +349,7 @@
     if (modalAberto()) return;
     if (e.key === 'F2') { e.preventDefault(); limparCampos(); aviso(null); irParaOrdem(); }
     else if (e.key === 'F4') { e.preventDefault(); cancelar(ultimos[0]); }
+    else if (e.key === 'F7') { e.preventDefault(); doar(alvoDoacao()); }
     else if (e.key === 'F9') {
       e.preventDefault();
       chk.checked = !chk.checked; chk.dispatchEvent(new Event('change'));
@@ -304,4 +360,9 @@
   pintarItem('vazio'); dicaValor();
   carregarUltimos();
   ordemEl.focus();
+  const pedido = new URLSearchParams(location.search).get('item');   // vindo de "Arrematar" na tela de Itens
+  if (pedido && /^\d+$/.test(pedido)) {
+    ordemEl.value = pedido;
+    resolverItem().then(it => { if (it) { arrEl.focus(); arrEl.select(); } });
+  }
 })();

@@ -3,22 +3,47 @@
 {% block content %}
 <div class="grid gap-6 lg:grid-cols-5">
   <section class="lg:col-span-3">
-    <h1 class="text-2xl font-extrabold mb-4">Cadastro de itens</h1>
+    <h1 id="tituloForm" class="text-2xl font-extrabold mb-4">Cadastro de itens</h1>
     <form id="form" autocomplete="off" novalidate class="space-y-4 bg-white rounded-xl p-5 border border-tinta/10">
-      <div class="grid gap-4 sm:grid-cols-2">
+      <div id="bannerEdicao" class="hidden rounded-lg border-2 border-ouro bg-ouro-claro p-3" role="status">
+        <p class="font-semibold">Editando o item nº <span id="edNum"></span>.</p>
+        <p class="text-sm">O número de ordem só muda se o item ainda não tem lances.</p>
+        <button type="button" id="edCancelar" class="botao botao-sec botao-pequeno mt-2">Cancelar edição <kbd>Esc</kbd></button>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-3 sm:items-end">
         <div>
           <label class="rotulo" for="ordem">Número de ordem</label>
           <input id="ordem" class="campo campo-grande" inputmode="numeric" value="{{ proximo }}" autofocus>
         </div>
+        <div class="sm:col-span-2">
+          <label class="rotulo" for="produto">Produto</label>
+          <input id="produto" class="campo" maxlength="120">
+        </div>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-3 sm:items-end">
         <div>
           <label class="rotulo" for="valor_minimo">Valor mínimo (R$)</label>
           <input id="valor_minimo" class="campo campo-grande" inputmode="decimal" placeholder="0,00">
         </div>
+        <div class="sm:col-span-2">
+          <label class="rotulo" for="tipo">Tipo do item</label>
+          <div class="flex gap-2">
+            <select id="tipo" class="campo flex-1"><option value="">Sem tipo</option></select>
+            <button type="button" id="tipoMais" class="botao text-2xl px-5" title="Cadastrar novo tipo (tecla +)"
+                    aria-label="Cadastrar novo tipo">+</button>
+          </div>
+        </div>
       </div>
-      <div>
-        <label class="rotulo" for="produto">Produto</label>
-        <input id="produto" class="campo" maxlength="120">
+      <div id="tipoNovo" class="hidden rounded-lg border-2 border-ouro bg-ouro-claro p-3 space-y-2">
+        <label class="rotulo" for="tipoNome">Novo tipo de item</label>
+        <div class="flex flex-wrap gap-2">
+          <input id="tipoNome" class="campo flex-1 min-w-[12rem]" maxlength="60" placeholder="Ex.: Bolo, Prenda, Bebida">
+          <button type="button" id="tipoSalvar" class="botao">Salvar tipo <kbd>Enter</kbd></button>
+          <button type="button" id="tipoCancelar" class="botao botao-sec">Cancelar <kbd>Esc</kbd></button>
+        </div>
+        <p id="tipoMsg" role="alert" class="text-tijolo font-semibold min-h-[1.25rem]"></p>
       </div>
+      <p id="tipoAviso" class="text-pinheiro font-semibold min-h-[1.25rem]" aria-live="polite"></p>
       <div>
         <label class="rotulo" for="descricao">Descrição</label>
         <input id="descricao" class="campo" maxlength="300">
@@ -29,7 +54,7 @@
         <p id="doadorInfo" class="mt-1 min-h-[1.5rem]" aria-live="polite"></p>
       </div>
       <div id="msg" role="alert" class="min-h-[1.5rem] text-tijolo font-semibold"></div>
-      <button type="submit" class="botao">Salvar item <kbd>Enter</kbd></button>
+      <button type="submit" class="botao"><span id="btnSalvarTxt">Salvar item</span> <kbd>Enter</kbd></button>
     </form>
   </section>
 
@@ -39,20 +64,77 @@
     </div>
     <div id="cartao" class="hidden rounded-2xl bg-pinheiro text-white p-3">
       <div class="rounded-xl border-4 border-dashed border-ouro px-6 py-8 text-center">
-        <p class="text-lg font-semibold text-white/80">Item cadastrado</p>
+        <p id="cartaoRotulo" class="text-lg font-semibold text-white/80">Item cadastrado</p>
         <p id="cartaoNumero" class="text-8xl font-extrabold tabular-nums leading-none my-3">0</p>
         <p id="cartaoProduto" class="text-2xl font-bold break-words"></p>
+        <p id="cartaoTipo" class="text-white/80"></p>
         <p id="cartaoMin" class="text-white/80"></p>
         <p id="cartaoDoador" class="text-white/80"></p>
       </div>
     </div>
   </aside>
 </div>
+
+<section class="mt-12" aria-labelledby="tituloLista">
+  <h2 id="tituloLista" class="text-2xl font-extrabold mb-4">Itens cadastrados</h2>
+
+  <div class="bg-white rounded-xl border border-tinta/10 p-4 mb-3 grid gap-4 md:grid-cols-6">
+    <div class="md:col-span-3">
+      <label class="rotulo" for="fBusca">Buscar</label>
+      <input id="fBusca" class="campo" autocomplete="off" placeholder="Número, produto, tipo, descrição ou doador">
+    </div>
+    <div>
+      <label class="rotulo" for="fSituacao">Situação</label>
+      <select id="fSituacao" class="campo">
+        <option value="">Todas</option>
+        <option value="disponivel">Disponíveis</option>
+        <option value="arrematado">Arrematados</option>
+      </select>
+    </div>
+    <div>
+      <label class="rotulo" for="fDoacao">Doações</label>
+      <select id="fDoacao" class="campo">
+        <option value="">Todas</option>
+        <option value="com">Já doados</option>
+        <option value="sem">Nunca doados</option>
+      </select>
+    </div>
+    <div class="flex items-end">
+      <button id="fLimpar" type="button" class="botao botao-sec w-full justify-center">Limpar filtros</button>
+    </div>
+  </div>
+  <p id="fAviso" class="mb-2 font-semibold min-h-[1.5rem]" role="status" aria-live="polite"></p>
+  <p id="fContagem" class="mb-3 text-sm text-tinta/70 min-h-[1.25rem]" aria-live="polite"></p>
+
+  <div class="bg-white rounded-xl border border-tinta/10 overflow-x-auto">
+    <table class="w-full text-left">
+      <thead class="bg-pinheiro-claro text-sm">
+        <tr>
+          <th class="px-4 py-3">Nº</th>
+          <th class="px-4 py-3">Produto</th>
+          <th class="px-4 py-3">Tipo</th>
+          <th class="px-4 py-3">Doador</th>
+          <th class="px-4 py-3 text-right">Valor mínimo</th>
+          <th class="px-4 py-3">Situação</th>
+          <th class="px-4 py-3">Doações</th>
+          <th class="px-4 py-3"><span class="sr-only">Ação</span></th>
+        </tr>
+      </thead>
+      <tbody id="linhasItens"></tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}
 {% block atalhos %}
 <li><kbd>Enter</kbd> avança de campo e, no último, salva</li>
 <li><kbd>Ctrl+Enter</kbd> salva de qualquer campo</li>
 <li><kbd>F2</kbd> limpa o formulário</li>
+<li><kbd>+</kbd> no campo Tipo abre o cadastro de um novo tipo</li>
+<li><kbd>Esc</kbd> cancela a edição de um item</li>
 <li><kbd>Setas</kbd> escolhem o doador na lista</li>
+<li><kbd>F3</kbd> ou <kbd>/</kbd> vão para a busca dos itens cadastrados</li>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/itens.js') }}"></script>{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/itens.js') }}"></script>
+<script src="{{ url_for('static', filename='js/itens_lista.js') }}"></script>
+{% endblock %}

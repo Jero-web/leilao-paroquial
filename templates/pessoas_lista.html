@@ -12,6 +12,8 @@
   <p id="contagem" class="mt-2 text-sm text-tinta/70 min-h-[1.25rem]" aria-live="polite"></p>
 </div>
 
+<p id="aviso" class="mb-3 font-semibold min-h-[1.5rem]" role="status" aria-live="polite"></p>
+
 <div class="bg-white rounded-xl border border-tinta/10 overflow-x-auto">
   <table class="w-full text-left">
     <thead class="bg-pinheiro-claro text-sm">
@@ -28,10 +30,47 @@
     <tbody id="linhas"></tbody>
   </table>
 </div>
+
+<div id="modalEd" class="hidden fixed inset-0 z-50 items-start justify-center overflow-y-auto bg-tinta/60 py-8 px-4" role="dialog" aria-modal="true" aria-labelledby="edTitulo">
+  <form id="formEd" novalidate autocomplete="off" class="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 space-y-4">
+    <h2 id="edTitulo" class="text-xl font-extrabold">Alterar cadastro nº <span id="edNum"></span></h2>
+    <div>
+      <label class="rotulo" for="edNome">Nome</label>
+      <input id="edNome" class="campo" maxlength="120">
+    </div>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <label class="rotulo" for="edCpf">CPF</label>
+        <input id="edCpf" class="campo" inputmode="numeric" placeholder="000.000.000-00">
+      </div>
+      <div>
+        <label class="rotulo" for="edTelefone">Telefone</label>
+        <input id="edTelefone" class="campo" inputmode="tel" placeholder="(00) 00000-0000">
+      </div>
+    </div>
+    <div>
+      <label class="rotulo" for="edEndereco">Endereço</label>
+      <input id="edEndereco" class="campo" maxlength="200">
+    </div>
+    <div>
+      <label class="rotulo" for="edFuncao">Função</label>
+      <select id="edFuncao" class="campo">
+        <option value="CLIENTE">Cliente</option>
+        <option value="COMISSAO">Membro da comissão</option>
+      </select>
+    </div>
+    <div id="edMsg" role="alert" class="min-h-[1.5rem] text-tijolo font-semibold"></div>
+    <div class="flex flex-wrap gap-3">
+      <button type="submit" class="botao">Salvar alterações <kbd>Enter</kbd></button>
+      <button type="button" id="edCancelar" class="botao botao-sec">Cancelar <kbd>Esc</kbd></button>
+    </div>
+  </form>
+</div>
 {% endblock %}
 {% block atalhos %}
 <li><kbd>Setas</kbd> escolhem a pessoa na lista</li>
 <li><kbd>Enter</kbd> abre a promissória da pessoa marcada</li>
+<li><kbd>F2</kbd> altera o cadastro da pessoa marcada</li>
 <li><kbd>Esc</kbd> limpa a busca</li>
 <li><kbd>F3</kbd> ou <kbd>/</kbd> volta para a busca</li>
 {% endblock %}
